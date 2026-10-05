@@ -2,8 +2,16 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- ページ全体のピンチ拡大を止め、アプリ内のズームだけを使う -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#2a2d36" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>お手本トレース - 見ながら描くアプリ</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icon.svg" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -11,13 +19,13 @@
     <!-- ===== 上段：お手本画像 ===== -->
     <section id="topPane" class="pane">
       <div class="toolbar">
-        <span class="title">🖼 お手本</span>
-        <label class="btn">
-          📁 フォルダを開く
+        <span class="title">🖼<span class="txt"> お手本</span></span>
+        <label class="btn pc-only">
+          📁<span class="txt"> フォルダを開く</span>
           <input type="file" id="folderInput" webkitdirectory directory multiple hidden />
         </label>
         <label class="btn">
-          🗂 画像を選ぶ
+          🗂<span class="txt"> 画像を選ぶ</span>
           <input type="file" id="fileInput" accept="image/*" multiple hidden />
         </label>
         <button class="btn" id="prevBtn" title="前の画像 (←)">◀</button>
@@ -27,7 +35,7 @@
         <button class="btn" id="zoomOutBtn" title="縮小">－</button>
         <span id="zoomLabel">100%</span>
         <button class="btn" id="zoomInBtn" title="拡大">＋</button>
-        <button class="btn" id="fitBtn" title="全体表示">⤢ 全体</button>
+        <button class="btn" id="fitBtn" title="全体表示">⤢<span class="txt"> 全体</span></button>
         <span class="sep"></span>
         <label class="chk"><input type="checkbox" id="gridToggle" /> グリッド</label>
         <input type="range" id="gridSize" min="20" max="200" value="50" title="グリッド間隔" />
@@ -36,7 +44,8 @@
         <img id="refImage" alt="" draggable="false" />
         <div class="grid-overlay"></div>
         <div id="dropHint" class="hint">
-          ここに画像をドラッグ＆ドロップ<br />または「📁 フォルダを開く」から選択
+          <span class="pc-only">ここに画像をドラッグ＆ドロップ<br />または「📁 フォルダを開く」から選択</span>
+          <span class="mobile-only">「🗂」ボタンから画像を選択<br />（複数選択できます）<br />1本指で移動・2本指で拡大縮小</span>
         </div>
       </div>
     </section>
@@ -47,15 +56,15 @@
     <!-- ===== 下段：描画エリア ===== -->
     <section id="bottomPane" class="pane">
       <div class="toolbar">
-        <span class="title">✏️ 描く</span>
+        <span class="title">✏️<span class="txt"> 描く</span></span>
         <div class="tool-group" id="toolGroup">
-          <button class="btn tool active" data-tool="pen" title="ペン (P)">🖊 ペン</button>
-          <button class="btn tool" data-tool="marker" title="マーカー (M)">🖍 マーカー</button>
-          <button class="btn tool" data-tool="eraser" title="消しゴム (E)">🧽 消しゴム</button>
-          <button class="btn tool" data-tool="line" title="直線 (L)">／ 直線</button>
-          <button class="btn tool" data-tool="rect" title="四角 (R)">▭ 四角</button>
-          <button class="btn tool" data-tool="ellipse" title="円 (O)">◯ 円</button>
-          <button class="btn tool" data-tool="fill" title="塗りつぶし (F)">🪣 塗り</button>
+          <button class="btn tool active" data-tool="pen" title="ペン (P)">🖊<span class="txt"> ペン</span></button>
+          <button class="btn tool" data-tool="marker" title="マーカー (M)">🖍<span class="txt"> マーカー</span></button>
+          <button class="btn tool" data-tool="eraser" title="消しゴム (E)">🧽<span class="txt"> 消しゴム</span></button>
+          <button class="btn tool" data-tool="line" title="直線 (L)">／<span class="txt"> 直線</span></button>
+          <button class="btn tool" data-tool="rect" title="四角 (R)">▭<span class="txt"> 四角</span></button>
+          <button class="btn tool" data-tool="ellipse" title="円 (O)">◯<span class="txt"> 円</span></button>
+          <button class="btn tool" data-tool="fill" title="塗りつぶし (F)">🪣<span class="txt"> 塗り</span></button>
         </div>
         <span class="sep"></span>
         <input type="color" id="colorPicker" value="#ffffff" title="色" />
@@ -67,10 +76,10 @@
         <span class="sep"></span>
         <button class="btn" id="undoBtn" title="元に戻す (Ctrl+Z)">↶</button>
         <button class="btn" id="redoBtn" title="やり直し (Ctrl+Y)">↷</button>
-        <button class="btn" id="clearBtn" title="全消去">🗑 クリア</button>
-        <button class="btn primary" id="saveBtn" title="PNG保存 (Ctrl+S)">💾 保存</button>
+        <button class="btn" id="clearBtn" title="全消去">🗑<span class="txt"> クリア</span></button>
+        <button class="btn primary" id="saveBtn" title="PNG保存 (Ctrl+S)">💾<span class="txt"> 保存</span></button>
         <span class="sep"></span>
-        <button class="btn" id="overlayBtn" title="お手本を薄く重ねる (T)">👻 重ねる</button>
+        <button class="btn" id="overlayBtn" title="お手本を薄く重ねる (T)">👻<span class="txt"> 重ねる</span></button>
         <label class="lbl">透明度 <input type="range" id="overlayAlpha" min="5" max="80" value="30" /></label>
       </div>
       <div id="canvasWrap" class="stage">

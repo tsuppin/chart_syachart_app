@@ -1,0 +1,14 @@
+{
+  "name": "お手本トレース",
+  "short_name": "トレース",
+  "description": "お手本画像を見ながら描き写せるお絵描きアプリ",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#1e2027",
+  "theme_color": "#2a2d36",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

@@ -4,6 +4,9 @@
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
+  const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+    window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+  if (IS_MOBILE) document.body.classList.add('mobile');
 
   /* ---------------------------------------------------------
    * 1. お手本画像ビューア（上段）
@@ -98,20 +101,67 @@
     zoomAt(e.deltaY < 0 ? 1.1 : 1 / 1.1, e.clientX - r.left, e.clientY - r.top);
   }, { passive: false });
 
-  // ドラッグで移動
-  let pan = null;
+  // ドラッグで移動 / 2本指ピンチでズーム（スマホ対応）
+  const touches = new Map(); // pointerId -> {x, y}
+  let gesture = null;
+  const localPt = (e) => {
+    const r = viewer.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  };
+  function startGesture() {
+    const pts = [...touches.values()];
+    if (pts.length === 1) {
+      gesture = { type: 'pan', sx: pts[0].x, sy: pts[0].y, ox: view.x, oy: view.y };
+    } else if (pts.length >= 2) {
+      const [a, b] = pts;
+      gesture = {
+        type: 'pinch',
+        dist: Math.hypot(b.x - a.x, b.y - a.y) || 1,
+        cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2,
+        scale: view.scale, ox: view.x, oy: view.y,
+      };
+    }
+  }
   viewer.addEventListener('pointerdown', (e) => {
-    pan = { sx: e.clientX, sy: e.clientY, ox: view.x, oy: view.y };
     viewer.setPointerCapture(e.pointerId);
+    touches.set(e.pointerId, localPt(e));
     viewer.classList.add('dragging');
+    startGesture();
   });
   viewer.addEventListener('pointermove', (e) => {
-    if (!pan) return;
-    view.x = pan.ox + e.clientX - pan.sx;
-    view.y = pan.oy + e.clientY - pan.sy;
+    if (!touches.has(e.pointerId) || !gesture) return;
+    touches.set(e.pointerId, localPt(e));
+    const pts = [...touches.values()];
+    if (gesture.type === 'pan') {
+      view.x = gesture.ox + pts[0].x - gesture.sx;
+      view.y = gesture.oy + pts[0].y - gesture.sy;
+    } else if (pts.length >= 2) {
+      const [a, b] = pts;
+      const ns = Math.min(20, Math.max(0.05, gesture.scale * Math.hypot(b.x - a.x, b.y - a.y) / gesture.dist));
+      const k = ns / gesture.scale;
+      const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
+      // 開始時の中心点が、現在の中心点に来るように
+      view.x = cx - (gesture.cx - gesture.ox) * k;
+      view.y = cy - (gesture.cy - gesture.oy) * k;
+      view.scale = ns;
+    }
     applyView();
   });
-  const endPan = () => { pan = null; viewer.classList.remove('dragging'); };
+  let lastTap = 0;
+  const endPan = (e) => {
+    const p = touches.get(e.pointerId);
+    const isTap = gesture && gesture.type === 'pan' && p &&
+      Math.hypot(p.x - gesture.sx, p.y - gesture.sy) < 10;
+    touches.delete(e.pointerId);
+    if (touches.size) { startGesture(); return; }
+    gesture = null;
+    viewer.classList.remove('dragging');
+    // ダブルタップで全体表示（タッチ用）
+    if (e.type === 'pointerup' && e.pointerType === 'touch' && isTap) {
+      const now = Date.now();
+      if (now - lastTap < 300) { fitImage(); lastTap = 0; } else lastTap = now;
+    }
+  };
   viewer.addEventListener('pointerup', endPan);
   viewer.addEventListener('pointercancel', endPan);
   viewer.addEventListener('dblclick', fitImage);
@@ -133,7 +183,8 @@
   const preview = $('previewCanvas');
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   const pctx = preview.getContext('2d');
-  const dpr = window.devicePixelRatio || 1;
+  // スマホは高DPRでメモリを圧迫するため最大2倍に制限
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
   const state = {
     tool: 'pen',
@@ -163,7 +214,7 @@
   // --- 履歴（Undo / Redo） ---
   const history = [];
   let histIndex = -1;
-  const MAX_HISTORY = 40;
+  const MAX_HISTORY = IS_MOBILE ? 15 : 40;
 
   function pushHistory() {
     history.splice(histIndex + 1);
@@ -308,6 +359,8 @@
 
   canvas.addEventListener('pointerdown', (e) => {
     if (e.button !== 0 && e.pointerType === 'mouse') return;
+    if (drawing) return; // 描画中の2本目の指・手のひらは無視
+    e.preventDefault();
     const p = getPos(e);
     const tool = state.tool;
 
@@ -316,7 +369,7 @@
       return;
     }
     canvas.setPointerCapture(e.pointerId);
-    drawing = { tool, pts: [p], start: p, last: p };
+    drawing = { id: e.pointerId, tool, pts: [p], start: p, last: p };
 
     if (tool === 'eraser') {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -334,7 +387,7 @@
   });
 
   canvas.addEventListener('pointermove', (e) => {
-    if (!drawing) return;
+    if (!drawing || e.pointerId !== drawing.id) return;
     const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
     const tool = drawing.tool;
 
@@ -361,7 +414,7 @@
   });
 
   function endDraw(e) {
-    if (!drawing) return;
+    if (!drawing || e.pointerId !== drawing.id) return;
     const tool = drawing.tool;
     if (tool === 'pen' || tool === 'marker') {
       setupStroke(ctx, tool);
@@ -424,13 +477,23 @@
     o.fillStyle = '#000';
     o.fillRect(0, 0, w, h);
     o.drawImage(canvas, 0, 0);
-    const a = document.createElement('a');
     const base = images[currentIndex] ? images[currentIndex].name.split(/[\\/]/).pop().replace(/\.[^.]+$/, '') : 'drawing';
-    a.download = `${base}_trace_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.png`;
-    a.href = out.toDataURL('image/png');
-    a.click();
+    const filename = `${base}_trace_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.png`;
+    out.toBlob((blob) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.download = filename;
+      a.href = url;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    }, 'image/png');
   }
   $('saveBtn').onclick = save;
+
+  // スマホの長押しメニューを抑止
+  [wrap, viewer].forEach((el) => el.addEventListener('contextmenu', (e) => e.preventDefault()));
 
   // --- お手本の重ね表示（上と同じ画角で薄く表示。保存には含まれない） ---
   const overlayBtn = $('overlayBtn');
