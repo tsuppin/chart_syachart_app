@@ -1,6 +1,6 @@
 {
-  "name": "お手本トレース",
-  "short_name": "トレース",
+  "name": "写チャート",
+  "short_name": "写チャート",
   "description": "お手本画像を見ながら描き写せるお絵描きアプリ",
   "start_url": "./index.html",
   "scope": "./",
