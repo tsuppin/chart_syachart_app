@@ -65,7 +65,9 @@
           <button class="btn tool" data-tool="rect" title="四角 (R)">▭<span class="txt"> 四角</span></button>
           <button class="btn tool" data-tool="ellipse" title="円 (O)">◯<span class="txt"> 円</span></button>
           <button class="btn tool" data-tool="fill" title="塗りつぶし (F)">🪣<span class="txt"> 塗り</span></button>
+          <button class="btn tool" data-tool="hand" title="移動 (H) ／ 2本指・スペース+ドラッグでも移動、ダブルクリックで位置リセット">✋<span class="txt"> 移動</span></button>
         </div>
+        <button class="btn" id="snapBtn" title="スナップ：直線を45度刻み・正方形・正円にする（PCはShiftキーでも可）">📐<span class="txt"> スナップ</span></button>
         <span class="sep"></span>
         <input type="color" id="colorPicker" value="#ffffff" title="色" />
         <div id="palette"></div>
@@ -83,9 +85,12 @@
         <label class="lbl">透明度 <input type="range" id="overlayAlpha" min="5" max="80" value="30" /></label>
       </div>
       <div id="canvasWrap" class="stage">
-        <img id="overlayImage" alt="" draggable="false" />
-        <canvas id="drawCanvas"></canvas>
-        <canvas id="previewCanvas"></canvas>
+        <!-- スワイプで動かすレイヤー（重ね画像・描画キャンバスを一緒に移動） -->
+        <div id="canvasLayer">
+          <img id="overlayImage" alt="" draggable="false" />
+          <canvas id="drawCanvas"></canvas>
+          <canvas id="previewCanvas"></canvas>
+        </div>
         <div class="grid-overlay"></div>
       </div>
     </section>
