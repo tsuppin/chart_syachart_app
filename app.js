@@ -107,10 +107,12 @@
 
   // ドラッグで移動 / 2本指ピンチでズーム（スマホ対応）
   // スワイプ（ドラッグ移動）の速度係数：1 = 指と同じ速さ、小さいほどゆっくり動く
-  const PAN_SPEED = 0.25;        // 上段（お手本）
+  const PAN_SPEED = 0.25;        // 上段（お手本）：指でスワイプした時
+  const MOUSE_PAN_SPEED = 1;     // 上段（お手本）：マウスで画像をつかんで動かした時
   const CANVAS_PAN_SPEED = 0.5;  // 下段（描画エリア）
   const touches = new Map(); // pointerId -> {x, y}
   let gesture = null;
+  let viewerPanSpeed = PAN_SPEED;
   const localPt = (e) => {
     const r = viewer.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
@@ -130,6 +132,7 @@
     }
   }
   viewer.addEventListener('pointerdown', (e) => {
+    viewerPanSpeed = e.pointerType === 'mouse' ? MOUSE_PAN_SPEED : PAN_SPEED;
     viewer.setPointerCapture(e.pointerId);
     touches.set(e.pointerId, localPt(e));
     viewer.classList.add('dragging');
@@ -140,8 +143,8 @@
     touches.set(e.pointerId, localPt(e));
     const pts = [...touches.values()];
     if (gesture.type === 'pan') {
-      view.x = gesture.ox + (pts[0].x - gesture.sx) * PAN_SPEED;
-      view.y = gesture.oy + (pts[0].y - gesture.sy) * PAN_SPEED;
+      view.x = gesture.ox + (pts[0].x - gesture.sx) * viewerPanSpeed;
+      view.y = gesture.oy + (pts[0].y - gesture.sy) * viewerPanSpeed;
     } else if (pts.length >= 2) {
       const [a, b] = pts;
       const ns = Math.min(20, Math.max(0.05, gesture.scale * Math.hypot(b.x - a.x, b.y - a.y) / gesture.dist));
