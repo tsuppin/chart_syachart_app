@@ -196,6 +196,7 @@
    * ------------------------------------------------------- */
   const wrap = $('canvasWrap');
   const layer = $('canvasLayer');
+  const canvasZoomLabel = $('canvasZoomLabel');
   const canvas = $('drawCanvas');
   const preview = $('previewCanvas');
   const ctx = canvas.getContext('2d');
@@ -218,14 +219,30 @@
 
   // --- 下段のスワイプ移動（パン） ---
   // キャンバスは表示領域の2倍（上下左右に半分ずつ余白）を確保し、その範囲内で移動できる
-  const pan = { x: 0, y: 0 };
+  const pan = { x: 0, y: 0, z: 1 }; // z = 拡大率
+  const MAX_CANVAS_ZOOM = 8;
+  // 縮小は「キャンバスが表示領域を覆う」ところまで
+  const clampZoom = (z) => Math.min(MAX_CANVAS_ZOOM,
+    Math.max(cssW ? Math.max(wrap.clientWidth / cssW, wrap.clientHeight / cssH) : 0.1, z));
   function applyPan() {
-    const minX = Math.min(0, wrap.clientWidth - cssW), minY = Math.min(0, wrap.clientHeight - cssH);
-    pan.x = Math.round(Math.min(0, Math.max(minX, pan.x)));
-    pan.y = Math.round(Math.min(0, Math.max(minY, pan.y)));
-    layer.style.transform = `translate(${pan.x}px, ${pan.y}px)`;
+    pan.z = clampZoom(pan.z);
+    const minX = Math.min(0, wrap.clientWidth - cssW * pan.z), minY = Math.min(0, wrap.clientHeight - cssH * pan.z);
+    pan.x = Math.min(0, Math.max(minX, pan.x));
+    pan.y = Math.min(0, Math.max(minY, pan.y));
+    layer.style.transform = `translate(${pan.x}px, ${pan.y}px) scale(${pan.z})`;
+    canvasZoomLabel.textContent = Math.round(pan.z * 100) + '%';
+  }
+  // 表示領域内の点 (cx, cy) を中心に拡大縮小
+  function zoomCanvasAt(factor, cx, cy) {
+    const nz = clampZoom(pan.z * factor);
+    const k = nz / pan.z;
+    pan.x = cx - (cx - pan.x) * k;
+    pan.y = cy - (cy - pan.y) * k;
+    pan.z = nz;
+    applyPan();
   }
   function resetPan() {
+    pan.z = 1;
     pan.x = -overlayOffset.x;
     pan.y = -overlayOffset.y;
     applyPan();
@@ -484,7 +501,8 @@
     });
   }
 
-  const getPos = (e, r) => ({ x: e.clientX - r.left, y: e.clientY - r.top });
+  // 画面座標 → キャンバス座標（下段の拡大率を考慮）
+  const getPos = (e, r) => ({ x: (e.clientX - r.left) / pan.z, y: (e.clientY - r.top) / pan.z });
   function expand(b, p) {
     if (p.x < b.minX) b.minX = p.x; if (p.x > b.maxX) b.maxX = p.x;
     if (p.y < b.minY) b.minY = p.y; if (p.y > b.maxY) b.maxY = p.y;
@@ -501,9 +519,17 @@
     for (const p of panPointers.values()) { x += p.x; y += p.y; }
     return { x: x / panPointers.size, y: y / panPointers.size };
   }
+  function pointerDist() {
+    const [a, b] = panPointers.values();
+    return Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  }
   function startPan() {
     const c = panCenter();
-    panGesture = { sx: c.x, sy: c.y, px: pan.x, py: pan.y };
+    panGesture = {
+      sx: c.x, sy: c.y, px: pan.x, py: pan.y, z: pan.z,
+      r: wrap.getBoundingClientRect(),
+      dist: panPointers.size >= 2 ? pointerDist() : 0,
+    };
     wrap.style.cursor = 'grabbing';
   }
   function endCanvasPan(e) {
@@ -594,9 +620,18 @@
   canvas.addEventListener('pointermove', (e) => {
     if (panPointers.has(e.pointerId)) {
       panPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const g = panGesture;
       const c = panCenter();
-      pan.x = panGesture.px + (c.x - panGesture.sx) * CANVAS_PAN_SPEED;
-      pan.y = panGesture.py + (c.y - panGesture.sy) * CANVAS_PAN_SPEED;
+      // 2本指なら指の間隔の変化で拡大縮小（ピンチ）
+      let z = g.z;
+      if (g.dist && panPointers.size >= 2) z = g.z * pointerDist() / g.dist;
+      z = clampZoom(z);
+      // 開始時に指の中心にあった点が、移動後の中心に来るように
+      const sx = g.sx - g.r.left, sy = g.sy - g.r.top;
+      const lx = (sx - g.px) / g.z, ly = (sy - g.py) / g.z;
+      pan.z = z;
+      pan.x = sx + (c.x - g.sx) * CANVAS_PAN_SPEED - lx * z;
+      pan.y = sy + (c.y - g.sy) * CANVAS_PAN_SPEED - ly * z;
       applyPan();
       return;
     }
@@ -681,6 +716,17 @@
   snapBtn.onclick = () => { state.snap = !state.snap; snapBtn.classList.toggle('active', state.snap); };
   // ✋ツールでダブルクリック／ダブルタップすると位置をリセット
   wrap.addEventListener('dblclick', () => { if (state.tool === 'hand') resetPan(); });
+  // 下段もホイールで拡大縮小（PC）
+  wrap.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    if (drawing) return;
+    const r = wrap.getBoundingClientRect();
+    zoomCanvasAt(e.deltaY < 0 ? 1.1 : 1 / 1.1, e.clientX - r.left, e.clientY - r.top);
+  }, { passive: false });
+  const canvasCenterZoom = (f) => zoomCanvasAt(f, wrap.clientWidth / 2, wrap.clientHeight / 2);
+  $('canvasZoomInBtn').onclick = () => canvasCenterZoom(1.25);
+  $('canvasZoomOutBtn').onclick = () => canvasCenterZoom(0.8);
+  canvasZoomLabel.onclick = resetPan;
 
   const colorPicker = $('colorPicker');
   colorPicker.oninput = () => (state.color = colorPicker.value);
@@ -711,14 +757,15 @@
   };
 
   function save() {
-    // 表示領域ぶん（スワイプで動かした位置）を黒背景で書き出し
+    // 表示領域ぶん（スワイプ・拡大した見た目のまま）を黒背景で書き出し
     const w = Math.round(wrap.clientWidth * dpr), h = Math.round(wrap.clientHeight * dpr);
     const out = document.createElement('canvas');
     out.width = w; out.height = h;
     const o = out.getContext('2d');
     o.fillStyle = '#000';
     o.fillRect(0, 0, w, h);
-    o.drawImage(canvas, Math.round(-pan.x * dpr), Math.round(-pan.y * dpr), w, h, 0, 0, w, h);
+    o.imageSmoothingQuality = 'high';
+    o.drawImage(canvas, -pan.x / pan.z * dpr, -pan.y / pan.z * dpr, w / pan.z, h / pan.z, 0, 0, w, h);
     const base = images[currentIndex] ? images[currentIndex].name.split(/[\\/]/).pop().replace(/\.[^.]+$/, '') : 'drawing';
     const filename = `${base}_trace_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.png`;
     out.toBlob((blob) => {
