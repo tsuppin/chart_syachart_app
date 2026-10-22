@@ -108,7 +108,7 @@
   // ドラッグで移動 / 2本指ピンチでズーム（スマホ対応）
   // スワイプ（ドラッグ移動）の速度係数：1 = 指と同じ速さ、小さいほどゆっくり動く
   const PAN_SPEED = 0.8;         // 上段（お手本）：指でスワイプした時
-  const MOUSE_PAN_SPEED = 1;     // 上段（お手本）：マウスで画像をつかんで動かした時
+  const MOUSE_PAN_SPEED = 0.6;   // 上段（お手本）：マウスで画像をつかんで動かした時（PC）
   const CANVAS_PAN_SPEED = 0.8;  // 下段（描画エリア）
   const touches = new Map(); // pointerId -> {x, y}
   let gesture = null;
