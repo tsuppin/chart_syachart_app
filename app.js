@@ -508,7 +508,7 @@
     if (p.y < b.minY) b.minY = p.y; if (p.y > b.maxY) b.maxY = p.y;
   }
 
-  // --- スワイプ移動：✋ツール / 2本指 / スペース+ドラッグ / マウス中ボタン ---
+  // --- スワイプ移動：✋ツール / 2本指 / スペース+ドラッグ / マウス中ボタン・右ボタン ---
   const panPointers = new Map(); // pointerId -> {x, y}（画面座標）
   let panGesture = null;
   let spaceDown = false;
@@ -566,12 +566,14 @@
   canvas.addEventListener('pointerdown', (e) => {
     const isMouse = e.pointerType === 'mouse';
     const isTouch = e.pointerType === 'touch';
-    if (isMouse && e.button !== 0 && e.button !== 1) return;
+    if (isMouse && e.button !== 0 && e.button !== 1 && e.button !== 2) return;
+    // PC：マウスの中ボタン・右ボタンでドラッグすると画像を移動
+    const mousePan = isMouse && (e.button === 1 || e.button === 2);
     // 指で描いている／塗りつぶし待ちの最中に2本目の指が触れたら、スワイプ移動に切り替える
     // （PCのスペース+ドラッグと同じように、いつでも移動できる。ペン入力中の手のひらは無視）
     const firstTouch = drawing && drawing.pointerType === 'touch' ? drawing : pendingFill;
     const twoFinger = isTouch && !!firstTouch;
-    if (panGesture || twoFinger || state.tool === 'hand' || spaceDown || (isMouse && e.button === 1)) {
+    if (panGesture || twoFinger || state.tool === 'hand' || spaceDown || mousePan) {
       e.preventDefault();
       canvas.setPointerCapture(e.pointerId);
       if (twoFinger) {
