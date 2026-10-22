@@ -67,6 +67,7 @@ input[type="color"] {
   position: absolute; left: 0; top: 0; transform-origin: 0 0;
   user-select: none; pointer-events: none; display: none;
   image-rendering: auto;
+  will-change: transform; /* GPU合成で移動を滑らかに */
 }
 .hint {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
