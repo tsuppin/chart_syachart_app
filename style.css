@@ -78,6 +78,16 @@ input[type="color"] {
 #canvasZoomLabel { cursor: pointer; }
 #canvasLayer { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
 #drawCanvas, #previewCanvas { position: absolute; left: 0; top: 0; }
+/* 下段の薄い方眼（キャンバスと一緒に移動・拡大する） */
+#paperGrid {
+  position: absolute; left: 0; top: 0; pointer-events: none;
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, .10) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, .10) 1px, transparent 1px),
+    linear-gradient(to right, rgba(255, 255, 255, .05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, .05) 1px, transparent 1px);
+  background-size: 100px 100px, 100px 100px, 25px 25px, 25px 25px;
+}
 #previewCanvas { pointer-events: none; }
 #overlayImage {
   position: absolute; left: 0; top: 0; transform-origin: 0 0;

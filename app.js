@@ -269,6 +269,9 @@
       c.style.width = w + 'px';
       c.style.height = h + 'px';
     }
+    const paperGrid = $('paperGrid');
+    paperGrid.style.width = w + 'px';
+    paperGrid.style.height = h + 'px';
     backup.width = W; backup.height = H;
     if (tmp) { ctx.drawImage(tmp, 0, 0); bctx.drawImage(tmp, 0, 0); }
     if (first) {

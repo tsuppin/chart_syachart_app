@@ -58,6 +58,11 @@
     <section id="bottomPane" class="pane">
       <div class="toolbar">
         <span class="title">✏️<span class="txt"> 描く</span></span>
+        <button class="btn" id="undoBtn" title="元に戻す (Ctrl+Z)">↶</button>
+        <button class="btn" id="redoBtn" title="やり直し (Ctrl+Y)">↷</button>
+        <span class="sep"></span>
+        <div id="palette"></div>
+        <span class="sep"></span>
         <div class="tool-group" id="toolGroup">
           <button class="btn tool active" data-tool="pen" title="ペン (P)">🖊<span class="txt"> ペン</span></button>
           <button class="btn tool" data-tool="marker" title="マーカー (M)">🖍<span class="txt"> マーカー</span></button>
@@ -75,14 +80,10 @@
         <button class="btn" id="canvasZoomInBtn" title="拡大（2本指ピンチ・ホイールでも可）">＋</button>
         <span class="sep"></span>
         <input type="color" id="colorPicker" value="#ffffff" title="色" />
-        <div id="palette"></div>
-        <span class="sep"></span>
         <label class="lbl">太さ <input type="range" id="sizeRange" min="1" max="60" value="4" /></label>
         <span id="sizeLabel">4</span>
         <label class="lbl">濃さ <input type="range" id="alphaRange" min="5" max="100" value="100" /></label>
         <span class="sep"></span>
-        <button class="btn" id="undoBtn" title="元に戻す (Ctrl+Z)">↶</button>
-        <button class="btn" id="redoBtn" title="やり直し (Ctrl+Y)">↷</button>
         <button class="btn" id="clearBtn" title="全消去">🗑<span class="txt"> クリア</span></button>
         <button class="btn primary" id="saveBtn" title="PNG保存 (Ctrl+S)">💾<span class="txt"> 保存</span></button>
         <span class="sep"></span>
@@ -93,6 +94,8 @@
         <!-- スワイプで動かすレイヤー（重ね画像・描画キャンバスを一緒に移動） -->
         <div id="canvasLayer">
           <img id="overlayImage" alt="" draggable="false" />
+          <!-- 常時表示の薄い方眼（表示のみ・保存画像には含まれない） -->
+          <div id="paperGrid"></div>
           <canvas id="drawCanvas"></canvas>
           <canvas id="previewCanvas"></canvas>
         </div>
