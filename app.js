@@ -107,8 +107,8 @@
 
   // ドラッグで移動 / 2本指ピンチでズーム（スマホ対応）
   // スワイプ（ドラッグ移動）の速度係数：1 = 指と同じ速さ、小さいほどゆっくり動く
-  const PAN_SPEED = 0.8;         // 上段（お手本）：指でスワイプした時
-  const MOUSE_PAN_SPEED = 0.6;   // 上段（お手本）：マウスで画像をつかんで動かした時（PC）
+  const PAN_SPEED = 0.5;         // 上段（お手本）：指でスワイプした時
+  const MOUSE_PAN_SPEED = 0.4;   // 上段（お手本）：マウスで画像をつかんで動かした時（PC）
   const CANVAS_PAN_SPEED = 0.8;  // 下段（描画エリア）
   const touches = new Map(); // pointerId -> {x, y}
   let gesture = null;
@@ -213,7 +213,22 @@
     size: 4,
     alpha: 1,
     snap: false, // スナップ（PCのShiftキーと同じ：直線45度・正方形・正円）
+    magnet: true, // マグネット（方眼の線に吸い寄せる・常にオン）
   };
+  // --- マグネット設定（下段の薄い方眼に合わせる） ---
+  const MAGNET_GRID = 10;      // 吸い寄せる線の間隔（style.css の #paperGrid の細い線と同じ）
+  const MAGNET_RANGE = 4;      // 線からこの距離(px)以内だと吸い寄せられる
+  const MAGNET_STRENGTH = 0.9; // 吸い寄せの強さ（0〜1、1で線にぴったり。小さいほど弱い）
+  // 線に近いほど強く、範囲の端では0になるので、線がカクッと飛ばない
+  function magnetAxis(v) {
+    const line = Math.round(v / MAGNET_GRID) * MAGNET_GRID;
+    const dist = Math.abs(v - line);
+    if (dist >= MAGNET_RANGE) return v;
+    return v + (line - v) * MAGNET_STRENGTH * (1 - dist / MAGNET_RANGE);
+  }
+  // ペン・消しゴム（フリーハンド）には効かせない。直線・四角・円だけに効く
+  const applyMagnet = (p, tool) =>
+    state.magnet && tool !== 'eraser' && tool !== 'pen' ? { x: magnetAxis(p.x), y: magnetAxis(p.y) } : p;
   let cssW = 0, cssH = 0;
   let drawing = null;
 
@@ -352,9 +367,9 @@
   }
 
   // --- 描画ヘルパー ---
-  const lineWidthFor = (tool) => (tool === 'marker' || tool === 'eraser' ? state.size * 3 : state.size);
-  const alphaFor = (tool) => (tool === 'marker' ? Math.min(state.alpha, 0.4) : state.alpha);
-  const isFreehand = (tool) => tool === 'pen' || tool === 'marker' || tool === 'eraser';
+  const lineWidthFor = (tool) => (tool === 'eraser' ? state.size * 3 : state.size);
+  const alphaFor = () => state.alpha;
+  const isFreehand = (tool) => tool === 'pen' || tool === 'eraser';
 
   function setupStroke(c, tool) {
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -613,9 +628,10 @@
     }
     canvas.setPointerCapture(e.pointerId);
     const snap = e.shiftKey || state.snap;
+    const mp = applyMagnet(p, tool);
     drawing = {
-      id: e.pointerId, tool, rect, pts: [p], start: p, last: p, shift: snap,
-      drawn: 0, mid: p, bounds: { minX: p.x, minY: p.y, maxX: p.x, maxY: p.y }, shapeRect: null,
+      id: e.pointerId, tool, rect, pts: [mp], start: mp, last: mp, shift: snap,
+      drawn: 0, mid: mp, bounds: { minX: mp.x, minY: mp.y, maxX: mp.x, maxY: mp.y }, shapeRect: null,
       pointerType: e.pointerType, t0: performance.now(), client: { x: e.clientX, y: e.clientY },
     };
     preview.style.opacity = tool === 'eraser' ? 1 : alphaFor(tool);
@@ -650,14 +666,14 @@
     if (isFreehand(d.tool)) {
       const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
       for (const ev of events) {
-        const p = getPos(ev, d.rect);
+        const p = applyMagnet(getPos(ev, d.rect), d.tool);
         const last = d.pts[d.pts.length - 1];
         if (Math.abs(p.x - last.x) + Math.abs(p.y - last.y) < 0.75) continue; // 細かすぎる点は間引く
         d.pts.push(p);
         expand(d.bounds, p);
       }
     } else {
-      d.last = getPos(e, d.rect);
+      d.last = applyMagnet(getPos(e, d.rect), d.tool);
       d.shift = e.shiftKey || state.snap;
     }
     scheduleRender();
@@ -717,8 +733,6 @@
     updateCursor();
   }
   toolButtons.forEach((b) => (b.onclick = () => setTool(b.dataset.tool)));
-  const snapBtn = $('snapBtn');
-  snapBtn.onclick = () => { state.snap = !state.snap; snapBtn.classList.toggle('active', state.snap); };
   // ✋ツールでダブルクリック／ダブルタップすると位置をリセット
   wrap.addEventListener('dblclick', () => { if (state.tool === 'hand') resetPan(); });
   // 下段もホイールで拡大縮小（PC）
@@ -733,24 +747,26 @@
   $('canvasZoomOutBtn').onclick = () => canvasCenterZoom(0.8);
   canvasZoomLabel.onclick = resetPan;
 
-  const colorPicker = $('colorPicker');
-  colorPicker.oninput = () => (state.color = colorPicker.value);
 
   // 並び：赤、緑、青、紫、オレンジ、黄色、白、黒
   const PALETTE = ['#e53935', '#43a047', '#1e88e5', '#8e24aa', '#fb8c00', '#fdd835', '#ffffff', '#222222'];
   const paletteEl = $('palette');
+  // 選択中の色のサークルを白く囲む
+  function selectColor(c) {
+    state.color = c;
+    paletteEl.querySelectorAll('.swatch').forEach((s) => s.classList.toggle('selected', s.dataset.color === c));
+  }
   PALETTE.forEach((c) => {
     const s = document.createElement('span');
     s.className = 'swatch';
     s.style.background = c;
     s.title = c;
-    s.onclick = () => { state.color = c; colorPicker.value = c; };
+    s.dataset.color = c;
+    s.onclick = () => selectColor(c);
     paletteEl.appendChild(s);
   });
+  selectColor(state.color);
 
-  const sizeRange = $('sizeRange');
-  sizeRange.oninput = () => { state.size = +sizeRange.value; $('sizeLabel').textContent = sizeRange.value; };
-  $('alphaRange').oninput = (e) => (state.alpha = +e.target.value / 100);
 
   $('undoBtn').onclick = undo;
   $('redoBtn').onclick = redo;
@@ -796,9 +812,7 @@
     overlayBtn.classList.toggle('active', on);
   }
   overlayBtn.onclick = () => toggleOverlay();
-  const overlayAlpha = $('overlayAlpha');
-  overlayAlpha.oninput = () => (overlayImage.style.opacity = overlayAlpha.value / 100);
-  overlayAlpha.oninput();
+  overlayImage.style.opacity = 0.3; // 重ね画像の透明度（固定）
 
   /* ---------------------------------------------------------
    * 3. グリッド・仕切り・ショートカット
@@ -845,7 +859,7 @@
       else if (k === 's') { e.preventDefault(); save(); }
       return;
     }
-    const map = { p: 'pen', m: 'marker', e: 'eraser', l: 'line', r: 'rect', o: 'ellipse', f: 'fill', h: 'hand' };
+    const map = { p: 'pen', l: 'line', r: 'rect', o: 'ellipse', f: 'fill', h: 'hand' };
     if (e.key === ' ') {
       // スペースを押している間はドラッグで下段を移動
       e.preventDefault();
@@ -856,8 +870,6 @@
     else if (k === 't') toggleOverlay();
     else if (e.key === 'ArrowLeft') showImage(currentIndex - 1);
     else if (e.key === 'ArrowRight') showImage(currentIndex + 1);
-    else if (e.key === '[') { sizeRange.value = Math.max(1, state.size - 1); sizeRange.oninput(); }
-    else if (e.key === ']') { sizeRange.value = Math.min(60, state.size + 1); sizeRange.oninput(); }
   });
   document.addEventListener('keyup', (e) => {
     if (e.key === ' ' && spaceDown) { spaceDown = false; updateCursor(); }

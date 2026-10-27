@@ -43,17 +43,15 @@ select {
 }
 .lbl, .chk { display: inline-flex; align-items: center; gap: 4px; }
 input[type="range"] { width: 90px; }
-input[type="color"] {
-  width: 34px; height: 28px; padding: 0; border: 1px solid #4a4f5e;
-  border-radius: 6px; background: none; cursor: pointer;
-}
-#palette { display: flex; gap: 3px; }
+#palette { display: flex; gap: 6px; padding: 0 2px; }
 .swatch {
   width: 20px; height: 20px; border-radius: 50%; cursor: pointer;
   border: 2px solid #555; 
 }
+/* 選択中の色：サークルの周りを白く囲む（内側の黒い隙間で白い色でも分かる） */
+.swatch.selected { border-color: #000; box-shadow: 0 0 0 2px #fff; }
 @media (hover: hover) { .swatch:hover { transform: scale(1.15); } }
-#zoomLabel, #sizeLabel, #canvasZoomLabel { min-width: 38px; text-align: center; font-variant-numeric: tabular-nums; }
+#zoomLabel, #canvasZoomLabel { min-width: 38px; text-align: center; font-variant-numeric: tabular-nums; }
 
 /* ステージ */
 .stage { position: relative; flex: 1; overflow: hidden; }
@@ -86,7 +84,7 @@ input[type="color"] {
     linear-gradient(to bottom, rgba(255, 255, 255, .10) 1px, transparent 1px),
     linear-gradient(to right, rgba(255, 255, 255, .05) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(255, 255, 255, .05) 1px, transparent 1px);
-  background-size: 100px 100px, 100px 100px, 25px 25px, 25px 25px;
+  background-size: 50px 50px, 50px 50px, 10px 10px, 10px 10px;
 }
 #previewCanvas { pointer-events: none; }
 #overlayImage {
@@ -136,7 +134,6 @@ body.mobile .toolbar > *, body.mobile .tool-group > * { flex-shrink: 0; }
 body.mobile .tool-group { flex-wrap: nowrap; }
 body.mobile .btn { min-width: 40px; min-height: 40px; justify-content: center; font-size: 16px; padding: 4px 8px; }
 body.mobile select { min-height: 40px; max-width: 140px; font-size: 14px; }
-body.mobile input[type="color"] { width: 40px; height: 40px; }
 body.mobile .swatch { width: 28px; height: 28px; }
 body.mobile input[type="range"] { width: 100px; height: 28px; }
 body.mobile #splitter { flex-basis: 18px; }
