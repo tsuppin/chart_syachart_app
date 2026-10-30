@@ -542,6 +542,60 @@
       }
       if (x - 1 > maxX) maxX = x - 1;
     }
+
+    // --- 隙間対策：線のフチ（アンチエイリアスで半透明になった部分）の下にも色を敷く ---
+    // 塗った領域から数ピクセルだけ、線の部分へ広げる。
+    // 線の「下」に合成するので線の見た目は変わらず、完全に不透明な線は越えない（はみ出し防止）。
+    const R = Math.max(2, Math.round(2 * dpr));
+    const isTargetLike = (q) => {
+      const i = q * 4;
+      return Math.abs(d[i] - target[0]) <= TOL && Math.abs(d[i + 1] - target[1]) <= TOL &&
+        Math.abs(d[i + 2] - target[2]) <= TOL && Math.abs(d[i + 3] - target[3]) <= TOL;
+    };
+    const fa = a / 255;
+    let frontier = [];
+    // 最初の境界：塗った画素に隣接する、未塗りの画素
+    for (let y = minY; y <= maxY; y++) {
+      for (let x = minX; x <= maxX; x++) {
+        const q = y * W + x;
+        if (visited[q] !== 1) continue;
+        if (x > 0 && !visited[q - 1]) frontier.push(q - 1);
+        if (x < W - 1 && !visited[q + 1]) frontier.push(q + 1);
+        if (y > 0 && !visited[q - W]) frontier.push(q - W);
+        if (y < H - 1 && !visited[q + W]) frontier.push(q + W);
+      }
+    }
+    for (let step = 0; step < R && frontier.length; step++) {
+      const next = [];
+      for (const q of frontier) {
+        if (visited[q]) continue;
+        // 線の外側の「塗り対象と同じ色」の画素には広げない（はみ出し防止）
+        if (isTargetLike(q)) continue;
+        visited[q] = 2;
+        const i = q * 4;
+        const ea = d[i + 3] / 255;
+        // 既存の画素を上、塗り色を下にして合成（destination-over）
+        const oa = ea + fa * (1 - ea);
+        if (oa > 0 && ea < 1) {
+          const wf = fa * (1 - ea);
+          d[i] = Math.round((d[i] * ea + r * wf) / oa);
+          d[i + 1] = Math.round((d[i + 1] * ea + g * wf) / oa);
+          d[i + 2] = Math.round((d[i + 2] * ea + b * wf) / oa);
+          d[i + 3] = Math.round(oa * 255);
+        }
+        // 完全に不透明な画素（線の芯）より先へは広げない
+        if (ea >= 1) continue;
+        const x = q % W, y = (q - x) / W;
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+        if (x > 0 && !visited[q - 1]) next.push(q - 1);
+        if (x < W - 1 && !visited[q + 1]) next.push(q + 1);
+        if (y > 0 && !visited[q - W]) next.push(q - W);
+        if (y < H - 1 && !visited[q + W]) next.push(q + W);
+      }
+      frontier = next;
+    }
+
     const rect = clampRect(minX, minY, maxX - minX + 1, maxY - minY + 1);
     ctx.putImageData(img, 0, 0, rect.x, rect.y, rect.w, rect.h); // 変更範囲だけ書き戻す
     return rect;
