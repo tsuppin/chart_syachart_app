@@ -98,18 +98,58 @@
   $('fitBtn').onclick = fitImage;
 
   // ホイールでズーム
+  // タッチパッドは細かいイベントが大量に来るため、スクロール量(deltaY)に比例させて拡大率を決める
+  // 速度係数：小さいほどゆっくり拡大縮小する
+  const WHEEL_ZOOM_SPEED = 0.001;  // マウスホイール1ノッチ(約100)で約10%
+  const PINCH_ZOOM_SPEED = 0.004;  // タッチパッドのピンチ操作（ctrlKey付きwheel）
+  const TOUCHPAD_PAN_SPEED = 1.0;  // タッチパッド2本指スワイプでの移動速度（1 = 指と同じ量）
+
+  // マウスホイールかタッチパッドかを推定する
+  // ・横方向の移動がある → タッチパッド
+  // ・行/ページ単位 → マウスホイール
+  // ・縦のみで大きめの整数刻み（例: 100, 120） → マウスホイール
+  // ・それ以外（小さい値・小数） → タッチパッド
+  let lastWheelWasTouchpad = false, lastWheelTime = 0;
+  function isTouchpadWheel(e) {
+    const now = performance.now();
+    let result;
+    if (e.deltaX !== 0) result = true;
+    else if (e.deltaMode !== 0) result = false;
+    else if (Number.isInteger(e.deltaY) && Math.abs(e.deltaY) >= 50) result = false;
+    else result = true;
+    // 連続したスワイプ中は判定を引き継ぐ（慣性スクロールの大きな値でズームに切り替わらないように）
+    if (now - lastWheelTime < 150 && lastWheelWasTouchpad) result = true;
+    lastWheelWasTouchpad = result;
+    lastWheelTime = now;
+    return result;
+  }
   viewer.addEventListener('wheel', (e) => {
     if (!refImage.naturalWidth) return;
     e.preventDefault();
     const r = viewer.getBoundingClientRect();
-    zoomAt(e.deltaY < 0 ? 1.1 : 1 / 1.1, e.clientX - r.left, e.clientY - r.top);
+
+    // タッチパッドの2本指スワイプ → 画像を移動
+    // （ピンチは ctrlKey 付きで来るのでズーム側へ。マウスホイールは従来どおりズーム）
+    if (!e.ctrlKey && isTouchpadWheel(e)) {
+      view.x -= e.deltaX * TOUCHPAD_PAN_SPEED;
+      view.y -= e.deltaY * TOUCHPAD_PAN_SPEED;
+      applyView();
+      return;
+    }
+
+    let dy = e.deltaY;
+    if (e.deltaMode === 1) dy *= 16;        // 行単位 → px換算
+    else if (e.deltaMode === 2) dy *= 400;  // ページ単位 → px換算
+    dy = Math.max(-100, Math.min(100, dy)); // 1回あたりの変化量を制限
+    const speed = e.ctrlKey ? PINCH_ZOOM_SPEED : WHEEL_ZOOM_SPEED;
+    zoomAt(Math.exp(-dy * speed), e.clientX - r.left, e.clientY - r.top);
   }, { passive: false });
 
   // ドラッグで移動 / 2本指ピンチでズーム（スマホ対応）
   // スワイプ（ドラッグ移動）の速度係数：1 = 指と同じ速さ、小さいほどゆっくり動く
   const PAN_SPEED = 0.5;         // 上段（お手本）：指でスワイプした時
-  const MOUSE_PAN_SPEED = 0.4;   // 上段（お手本）：マウスで画像をつかんで動かした時（PC）
-  const CANVAS_PAN_SPEED = 0.8;  // 下段（描画エリア）
+  const MOUSE_PAN_SPEED = 1.0;   // 上段（お手本）：マウスで画像をつかんで動かした時（PC）
+  const CANVAS_PAN_SPEED = 0.8;  // 下段（描画エリア）※現在は未使用：下段も上段と同じ速度を使う
   const touches = new Map(); // pointerId -> {x, y}
   let gesture = null;
   let viewerPanSpeed = PAN_SPEED;
@@ -541,12 +581,14 @@
     const [a, b] = panPointers.values();
     return Math.hypot(b.x - a.x, b.y - a.y) || 1;
   }
+  let canvasPanSpeed = PAN_SPEED; // 上段と同じ速度（マウス＝MOUSE_PAN_SPEED、指＝PAN_SPEED）
   function startPan() {
     const c = panCenter();
     panGesture = {
       sx: c.x, sy: c.y, px: pan.x, py: pan.y, z: pan.z,
       r: wrap.getBoundingClientRect(),
       dist: panPointers.size >= 2 ? pointerDist() : 0,
+      speed: canvasPanSpeed,
     };
     wrap.style.cursor = 'grabbing';
   }
@@ -594,6 +636,7 @@
     if (panGesture || twoFinger || state.tool === 'hand' || spaceDown || mousePan) {
       e.preventDefault();
       canvas.setPointerCapture(e.pointerId);
+      canvasPanSpeed = isMouse ? MOUSE_PAN_SPEED : PAN_SPEED;
       if (twoFinger) {
         panPointers.set(firstTouch.id, firstTouch.client);
         if (pendingFill) pendingFill = null;
@@ -651,8 +694,8 @@
       const sx = g.sx - g.r.left, sy = g.sy - g.r.top;
       const lx = (sx - g.px) / g.z, ly = (sy - g.py) / g.z;
       pan.z = z;
-      pan.x = sx + (c.x - g.sx) * CANVAS_PAN_SPEED - lx * z;
-      pan.y = sy + (c.y - g.sy) * CANVAS_PAN_SPEED - ly * z;
+      pan.x = sx + (c.x - g.sx) * g.speed - lx * z;
+      pan.y = sy + (c.y - g.sy) * g.speed - ly * z;
       applyPan();
       return;
     }
@@ -736,11 +779,23 @@
   // ✋ツールでダブルクリック／ダブルタップすると位置をリセット
   wrap.addEventListener('dblclick', () => { if (state.tool === 'hand') resetPan(); });
   // 下段もホイールで拡大縮小（PC）
+  // 上段と同じ操作感：タッチパッド2本指スワイプ＝移動、ピンチ／マウスホイール＝拡大縮小
   wrap.addEventListener('wheel', (e) => {
     e.preventDefault();
     if (drawing) return;
     const r = wrap.getBoundingClientRect();
-    zoomCanvasAt(e.deltaY < 0 ? 1.1 : 1 / 1.1, e.clientX - r.left, e.clientY - r.top);
+    if (!e.ctrlKey && isTouchpadWheel(e)) {
+      pan.x -= e.deltaX * TOUCHPAD_PAN_SPEED;
+      pan.y -= e.deltaY * TOUCHPAD_PAN_SPEED;
+      applyPan();
+      return;
+    }
+    let dy = e.deltaY;
+    if (e.deltaMode === 1) dy *= 16;
+    else if (e.deltaMode === 2) dy *= 400;
+    dy = Math.max(-100, Math.min(100, dy));
+    const speed = e.ctrlKey ? PINCH_ZOOM_SPEED : WHEEL_ZOOM_SPEED;
+    zoomCanvasAt(Math.exp(-dy * speed), e.clientX - r.left, e.clientY - r.top);
   }, { passive: false });
   const canvasCenterZoom = (f) => zoomCanvasAt(f, wrap.clientWidth / 2, wrap.clientHeight / 2);
   $('canvasZoomInBtn').onclick = () => canvasCenterZoom(1.25);
