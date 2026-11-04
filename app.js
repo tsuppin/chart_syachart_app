@@ -21,8 +21,7 @@
   let images = [];          // { name, url }
   let currentIndex = -1;
   const view = { scale: 1, x: 0, y: 0 };
-  // 下段キャンバスの左上余白（初期状態で重ね画像が上段と同じ画角になるよう補正する量）
-  const overlayOffset = { x: 0, y: 0 };
+  const pan = { x: 0, y: 0, z: 1 }; // 下段の移動量・拡大率
 
   const isImage = (f) => f.type.startsWith('image/') ||
     /\.(png|jpe?g|gif|bmp|webp|svg|avif)$/i.test(f.name);
@@ -70,11 +69,14 @@
   const overlayView = { scale: 1, x: 0, y: 0 };
   function syncOverlay() {
     Object.assign(overlayView, view);
-    applyOverlay();
+    if (typeof syncOverlayView === 'function') syncOverlayView();
+    else applyOverlay();
   }
   function applyOverlay() {
-    overlayImage.style.transform =
-      `translate(${overlayView.x + overlayOffset.x}px, ${overlayView.y + overlayOffset.y}px) scale(${overlayView.scale})`;
+    const ox = pan.x + overlayView.x * pan.z;
+    const oy = pan.y + overlayView.y * pan.z;
+    const os = overlayView.scale * pan.z;
+    overlayImage.style.transform = `translate3d(${ox}px, ${oy}px, 0) scale(${os})`;
   }
   // 表示が変わる時だけ文字を書き換える（移動中に毎回書き換えるとレイアウト計算が走りカクつくため）
   function setLabel(el, text) {
@@ -92,7 +94,7 @@
   }
 
   function zoomAt(factor, cx, cy) {
-    const ns = Math.min(20, Math.max(0.05, view.scale * factor));
+    const ns = Math.min(30, Math.max(0.05, view.scale * factor));
     const k = ns / view.scale;
     view.x = cx - (cx - view.x) * k;
     view.y = cy - (cy - view.y) * k;
@@ -203,7 +205,7 @@
       view.y = gesture.oy + (pts[0].y - gesture.sy) * viewerPanSpeed;
     } else if (pts.length >= 2) {
       const [a, b] = pts;
-      const ns = Math.min(20, Math.max(0.05, gesture.scale * Math.hypot(b.x - a.x, b.y - a.y) / gesture.dist));
+      const ns = Math.min(30, Math.max(0.05, gesture.scale * Math.hypot(b.x - a.x, b.y - a.y) / gesture.dist));
       const k = ns / gesture.scale;
       const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
       // 開始時の中心点が、現在の中心点に来るように
@@ -244,23 +246,22 @@
 
   /* ---------------------------------------------------------
    * 2. 描画キャンバス（下段）
-   *   軽量化のポイント：
-   *   - 描画中は previewCanvas に「新しい区間だけ」を描き足す（毎回の全再描画をしない）
-   *   - 濃さは previewCanvas の CSS opacity で表現し、確定時に1回だけ合成
-   *   - 描画処理は requestAnimationFrame で1フレーム1回にまとめる
-   *   - Undo履歴は「変更された矩形範囲だけ」を保存（全画面コピーをしない）
-   *   - キャンバスは GPU 描画のまま（willReadFrequently を使わない）
+   *   高倍率ズーム＆軽量描画のポイント：
+   *   - キャンバスは常に「現在の表示領域サイズ × DPR」で保持し、拡大しても線がぼやけない
+   *   - 線の太さ・文字サイズは描画時の画面拡大率(1 / pan.z)に合わせて自動調整
+   *   - 2本指スワイプ・ピンチ中は GPU CSS transform だけで滑らかに移動し、指を離した時にくっきり再描画
+   *   - 描画中は previewCanvas に「新しい区間だけ」を描き足し、確定時に1回だけ合成
+   *   - ストロークをベクター履歴で保持し、画面外の線・区間はカリングして高速再描画
    * ------------------------------------------------------- */
   const wrap = $('canvasWrap');
   const layer = $('canvasLayer');
   const canvasZoomLabel = $('canvasZoomLabel');
+  const paperGrid = $('paperGrid');
   const canvas = $('drawCanvas');
   const preview = $('previewCanvas');
+  const gctx = paperGrid.getContext('2d');
   const ctx = canvas.getContext('2d');
   const pctx = preview.getContext('2d');
-  // 確定済み画像の控え（Undo用の「変更前」をここから切り出す）
-  const backup = document.createElement('canvas');
-  const bctx = backup.getContext('2d');
   // スマホは高DPRでメモリを圧迫するため最大2倍に制限
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
@@ -269,98 +270,177 @@
     color: '#ffffff',
     size: 4,
     alpha: 0.85, // えんぴつ風の質感は残しつつ、しっかり見やすい濃さに
-    snap: false, // スナップ（PCのShiftキーと同じ：直線45度・正方形・正円）
+    snap: false, // スナップ（PCのShiftキーと同じ：直線45度・正方形）
     magnet: true, // マグネット（方眼の線に吸い寄せる・常にオン）
   };
   // --- マグネット設定（下段の薄い方眼に合わせる） ---
-  const MAGNET_GRID = 10;      // 吸い寄せる線の間隔（style.css の #paperGrid の細い線と同じ）
-  const MAGNET_RANGE = 4;      // 線からこの距離(px)以内だと吸い寄せられる
+  const MAGNET_GRID = 10;      // 吸い寄せる線の間隔（ワールド座標10px）
+  const MAGNET_RANGE = 4;      // 線から画面上でこの距離(px)以内だと吸い寄せられる
   const MAGNET_STRENGTH = 0.9; // 吸い寄せの強さ（0〜1、1で線にぴったり。小さいほど弱い）
   // 線に近いほど強く、範囲の端では0になるので、線がカクッと飛ばない
-  function magnetAxis(v) {
+  function magnetAxis(v, z) {
     const line = Math.round(v / MAGNET_GRID) * MAGNET_GRID;
     const dist = Math.abs(v - line);
-    if (dist >= MAGNET_RANGE) return v;
-    return v + (line - v) * MAGNET_STRENGTH * (1 - dist / MAGNET_RANGE);
+    const range = MAGNET_RANGE / z;
+    if (dist >= range) return v;
+    return v + (line - v) * MAGNET_STRENGTH * (1 - dist / range);
   }
-  // ペン・消しゴム（フリーハンド）には効かせない。直線・四角・円だけに効く
-  const applyMagnet = (p, tool) =>
-    state.magnet && tool !== 'eraser' && tool !== 'pen' ? { x: magnetAxis(p.x), y: magnetAxis(p.y) } : p;
-  let cssW = 0, cssH = 0;
-  let drawing = null;
+  // ペン（フリーハンド）には効かせない。直線・四角だけに効く
+  const applyMagnet = (p, tool, z) =>
+    state.magnet && tool !== 'pen' ? { x: magnetAxis(p.x, z), y: magnetAxis(p.y, z) } : p;
 
-  // --- 下段のスワイプ移動（パン） ---
-  // キャンバスは表示領域の2倍（上下左右に半分ずつ余白）を確保し、その範囲内で移動できる
-  const pan = { x: 0, y: 0, z: 1 }; // z = 拡大率
-  const MAX_CANVAS_ZOOM = 8;
-  // 縮小は「キャンバスが表示領域を覆う」ところまで
-  const clampZoom = (z) => Math.min(MAX_CANVAS_ZOOM,
-    Math.max(cssW ? Math.max(wrap.clientWidth / cssW, wrap.clientHeight / cssH) : 0.1, z));
+  let viewW = 0, viewH = 0;
+  let drawing = null;
+  const renderedView = { x: 0, y: 0, z: 1 };
+  let wheelSyncTimer = 0;
+
+  // --- 下段のスワイプ移動（パン）・拡大縮小 ---
+  const MIN_CANVAS_ZOOM = 0.25;
+  // 重ねたお手本画像が全体表示で縮小されていても、元画像の細部まで十分拡大できるように上限を拡張（最低4000%・最大10000%）
+  const maxCanvasZoom = () =>
+    Math.min(100, Math.max(40, refImage.naturalWidth && overlayView.scale ? Math.ceil(30 / overlayView.scale) : 40));
+  const clampZoom = (z) => Math.min(maxCanvasZoom(), Math.max(MIN_CANVAS_ZOOM, z));
+
   function applyPan() {
     pan.z = clampZoom(pan.z);
-    const minX = Math.min(0, wrap.clientWidth - cssW * pan.z), minY = Math.min(0, wrap.clientHeight - cssH * pan.z);
-    pan.x = Math.min(0, Math.max(minX, pan.x));
-    pan.y = Math.min(0, Math.max(minY, pan.y));
-    layer.style.transform = `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${pan.z})`;
+    const vw = viewW || wrap.clientWidth || 1;
+    const vh = viewH || wrap.clientHeight || 1;
+    let wMinX = -vw, wMaxX = vw * 2, wMinY = -vh, wMaxY = vh * 2;
+    if (refImage.naturalWidth) {
+      const ix0 = overlayView.x, iy0 = overlayView.y;
+      const ix1 = ix0 + refImage.naturalWidth * overlayView.scale;
+      const iy1 = iy0 + refImage.naturalHeight * overlayView.scale;
+      wMinX = Math.min(wMinX, ix0 - vw * 0.5);
+      wMaxX = Math.max(wMaxX, ix1 + vw * 0.5);
+      wMinY = Math.min(wMinY, iy0 - vh * 0.5);
+      wMaxY = Math.max(wMaxY, iy1 + vh * 0.5);
+    }
+    const minPanX = vw * 0.5 - wMaxX * pan.z, maxPanX = vw * 0.5 - wMinX * pan.z;
+    const minPanY = vh * 0.5 - wMaxY * pan.z, maxPanY = vh * 0.5 - wMinY * pan.z;
+    pan.x = Math.min(maxPanX, Math.max(minPanX, pan.x));
+    pan.y = Math.min(maxPanY, Math.max(minPanY, pan.y));
+
+    const k = pan.z / renderedView.z;
+    const dx = pan.x - renderedView.x * k;
+    const dy = pan.y - renderedView.y * k;
+    layer.style.transform = `translate3d(${dx}px, ${dy}px, 0) scale(${k})`;
+    applyOverlay();
     setLabel(canvasZoomLabel, Math.round(pan.z * 100) + '%');
   }
-  // スワイプ中の再描画は1フレーム1回にまとめる（指の移動イベントは1フレームに何回も来るため）
+
+  function syncOverlayView() {
+    applyPan();
+  }
+
+  // スワイプ中の移動反映は1フレーム1回にまとめる
   let panRafId = 0;
   function schedulePan() {
     if (panRafId) return;
     panRafId = requestAnimationFrame(() => { panRafId = 0; applyPan(); });
   }
+
+  function drawPaperGrid() {
+    gctx.setTransform(1, 0, 0, 1, 0, 0);
+    gctx.clearRect(0, 0, paperGrid.width, paperGrid.height);
+    if (!viewW || !viewH) return;
+    const vz = renderedView.z, vx = renderedView.x, vy = renderedView.y;
+    gctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    gctx.lineWidth = 1;
+
+    const minor = 10 * vz;
+    if (minor >= 4) {
+      gctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+      gctx.beginPath();
+      const i0 = Math.ceil((-vx) / minor), i1 = Math.floor((viewW - vx) / minor);
+      for (let i = i0; i <= i1; i++) {
+        if (i % 5 === 0) continue;
+        const x = Math.floor(vx + i * 10 * vz) + 0.5;
+        gctx.moveTo(x, 0); gctx.lineTo(x, viewH);
+      }
+      const j0 = Math.ceil((-vy) / minor), j1 = Math.floor((viewH - vy) / minor);
+      for (let j = j0; j <= j1; j++) {
+        if (j % 5 === 0) continue;
+        const y = Math.floor(vy + j * 10 * vz) + 0.5;
+        gctx.moveTo(0, y); gctx.lineTo(viewW, y);
+      }
+      gctx.stroke();
+    }
+
+    const major = 50 * vz;
+    if (major >= 4) {
+      gctx.strokeStyle = 'rgba(255, 255, 255, 0.10)';
+      gctx.beginPath();
+      const i0 = Math.ceil((-vx) / major), i1 = Math.floor((viewW - vx) / major);
+      for (let i = i0; i <= i1; i++) {
+        const x = Math.floor(vx + i * 50 * vz) + 0.5;
+        gctx.moveTo(x, 0); gctx.lineTo(x, viewH);
+      }
+      const j0 = Math.ceil((-vy) / major), j1 = Math.floor((viewH - vy) / major);
+      for (let j = j0; j <= j1; j++) {
+        const y = Math.floor(vy + j * 50 * vz) + 0.5;
+        gctx.moveTo(0, y); gctx.lineTo(viewW, y);
+      }
+      gctx.stroke();
+    }
+  }
+
+  function syncRenderedView() {
+    if (drawing) return;
+    if (wheelSyncTimer) { clearTimeout(wheelSyncTimer); wheelSyncTimer = 0; }
+    if (panRafId) { cancelAnimationFrame(panRafId); panRafId = 0; }
+    applyPan();
+    renderedView.x = pan.x;
+    renderedView.y = pan.y;
+    renderedView.z = pan.z;
+    layer.style.transform = 'translate3d(0px, 0px, 0px) scale(1)';
+    wrap.classList.remove('panning');
+    if (textEdit) {
+      const sx = pan.x + textEdit.p.x * pan.z, sy = pan.y + textEdit.p.y * pan.z;
+      textEdit.input.style.left = (sx - 3) + 'px';
+      textEdit.input.style.top = (sy - TEXT_SIZE * 0.625 - 1) + 'px';
+    }
+    drawPaperGrid();
+    renderAllStrokes();
+  }
+  function scheduleWheelSync() {
+    wrap.classList.add('panning');
+    if (wheelSyncTimer) clearTimeout(wheelSyncTimer);
+    wheelSyncTimer = setTimeout(syncRenderedView, 120);
+  }
+
   // 表示領域内の点 (cx, cy) を中心に拡大縮小
-  function zoomCanvasAt(factor, cx, cy) {
+  function zoomCanvasAt(factor, cx, cy, immediate = true) {
+    if (textEdit) commitText();
     const nz = clampZoom(pan.z * factor);
     const k = nz / pan.z;
     pan.x = cx - (cx - pan.x) * k;
     pan.y = cy - (cy - pan.y) * k;
     pan.z = nz;
-    applyPan();
+    if (immediate) syncRenderedView();
+    else { applyPan(); scheduleWheelSync(); }
   }
   function resetPan() {
+    if (textEdit) commitText();
     pan.z = 1;
-    pan.x = -overlayOffset.x;
-    pan.y = -overlayOffset.y;
-    applyPan();
+    pan.x = 0;
+    pan.y = 0;
+    syncRenderedView();
   }
 
-  // キャンバスサイズ調整（内容は保持、縮小はしない。再確保を減らすため256px単位で拡張）
+  // キャンバスサイズ調整（表示領域ぴったりに合わせ、ベクター履歴からくっきり再描画）
   function resizeCanvas() {
     if (drawing) return;
-    const needW = wrap.clientWidth * 2, needH = wrap.clientHeight * 2;
-    if (needW <= cssW && needH <= cssH) { applyPan(); return; }
-    const first = !cssW;
-    const w = Math.max(cssW, Math.ceil(needW / 256) * 256);
-    const h = Math.max(cssH, Math.ceil(needH / 256) * 256);
-    let tmp = null;
-    if (cssW) {
-      tmp = document.createElement('canvas');
-      tmp.width = canvas.width; tmp.height = canvas.height;
-      tmp.getContext('2d').drawImage(canvas, 0, 0);
-    }
-    cssW = w; cssH = h;
+    const w = Math.max(1, wrap.clientWidth);
+    const h = Math.max(1, wrap.clientHeight);
+    if (w === viewW && h === viewH) { applyPan(); return; }
+    viewW = w; viewH = h;
     const W = Math.round(w * dpr), H = Math.round(h * dpr);
-    for (const c of [canvas, preview]) {
+    for (const c of [paperGrid, canvas, preview]) {
       c.width = W; c.height = H;
       c.style.width = w + 'px';
       c.style.height = h + 'px';
     }
-    const paperGrid = $('paperGrid');
-    paperGrid.style.width = w + 'px';
-    paperGrid.style.height = h + 'px';
-    backup.width = W; backup.height = H;
-    if (tmp) { ctx.drawImage(tmp, 0, 0); bctx.drawImage(tmp, 0, 0); }
-    if (first) {
-      // 初回：中央が見えるように配置し、重ね画像の位置も合わせる
-      overlayOffset.x = Math.round(wrap.clientWidth / 2);
-      overlayOffset.y = Math.round(wrap.clientHeight / 2);
-      applyOverlay();
-      resetPan();
-    } else {
-      applyPan();
-    }
+    syncRenderedView();
   }
   let resizeQueued = false;
   function requestResize() {
@@ -369,59 +449,36 @@
     requestAnimationFrame(() => { resizeQueued = false; resizeCanvas(); });
   }
 
-  // --- 履歴（Undo / Redo）：変更範囲のパッチだけを保存 ---
+  // --- 履歴（Undo / Redo）：ベクターストロークを保持 ---
   const undoStack = [];
-  let histIndex = 0;   // 適用済みの件数
-  let histBytes = 0;
-  const MAX_HISTORY = 100;
-  const MAX_BYTES = (IS_MOBILE ? 80 : 300) * 1024 * 1024;
-  const entryBytes = (e) => e.before.data.length * 2;
+  let histIndex = 0;
+  const MAX_HISTORY = 300;
 
-  function clampRect(x, y, w, h) {
-    const x0 = Math.max(0, Math.floor(x)), y0 = Math.max(0, Math.floor(y));
-    const x1 = Math.min(canvas.width, Math.ceil(x + w)), y1 = Math.min(canvas.height, Math.ceil(y + h));
-    return x1 > x0 && y1 > y0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
-  }
-  // CSS座標の範囲 → デバイスピクセルの矩形
-  function boundsToRect(b, pad) {
-    return clampRect((b.minX - pad) * dpr, (b.minY - pad) * dpr,
-      (b.maxX - b.minX + pad * 2) * dpr, (b.maxY - b.minY + pad * 2) * dpr);
-  }
-
-  function commitHistory(rect) {
-    if (!rect) return;
-    const { x, y, w, h } = rect;
-    const before = bctx.getImageData(x, y, w, h);
-    const after = ctx.getImageData(x, y, w, h);
-    // 控えを更新
-    bctx.clearRect(x, y, w, h);
-    bctx.drawImage(canvas, x, y, w, h, x, y, w, h);
-    // やり直し分を破棄
-    while (undoStack.length > histIndex) histBytes -= entryBytes(undoStack.pop());
-    const entry = { rect, before, after };
+  function pushHistory(entry) {
+    undoStack.length = histIndex;
     undoStack.push(entry);
-    histBytes += entryBytes(entry);
-    histIndex++;
-    while (undoStack.length > MAX_HISTORY || (histBytes > MAX_BYTES && undoStack.length > 1)) {
-      histBytes -= entryBytes(undoStack.shift());
-      histIndex--;
-    }
+    if (undoStack.length > MAX_HISTORY) undoStack.shift();
+    histIndex = undoStack.length;
     updateHistoryButtons();
   }
-  function applyPatch(rect, data) {
-    ctx.putImageData(data, rect.x, rect.y);
-    bctx.putImageData(data, rect.x, rect.y);
+  function hasVisibleStrokes() {
+    for (let i = histIndex - 1; i >= 0; i--) {
+      return undoStack[i].tool !== 'clear';
+    }
+    return false;
   }
   function undo() {
     if (drawing || histIndex <= 0) return;
-    const e = undoStack[--histIndex];
-    applyPatch(e.rect, e.before);
+    commitText();
+    histIndex--;
+    renderAllStrokes();
     updateHistoryButtons();
   }
   function redo() {
     if (drawing || histIndex >= undoStack.length) return;
-    const e = undoStack[histIndex++];
-    applyPatch(e.rect, e.after);
+    commitText();
+    histIndex++;
+    renderAllStrokes();
     updateHistoryButtons();
   }
   function updateHistoryButtons() {
@@ -429,11 +486,21 @@
     $('redoBtn').disabled = histIndex >= undoStack.length;
   }
 
+  // ワールド座標の範囲 → 表示領域内のデバイスピクセル矩形
+  function worldBoundsToDeviceRect(b, screenPadCss) {
+    const sx0 = renderedView.x + b.minX * renderedView.z - screenPadCss;
+    const sy0 = renderedView.y + b.minY * renderedView.z - screenPadCss;
+    const sx1 = renderedView.x + b.maxX * renderedView.z + screenPadCss;
+    const sy1 = renderedView.y + b.maxY * renderedView.z + screenPadCss;
+    const x0 = Math.max(0, Math.floor(sx0 * dpr));
+    const y0 = Math.max(0, Math.floor(sy0 * dpr));
+    const x1 = Math.min(canvas.width, Math.ceil(sx1 * dpr));
+    const y1 = Math.min(canvas.height, Math.ceil(sy1 * dpr));
+    return x1 > x0 && y1 > y0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
+  }
+
   // --- 描画ヘルパー（えんぴつ風テクスチャ・薄めの発色） ---
-  const lineWidthFor = (tool) => (tool === 'eraser' ? state.size * 3 : state.size);
-  const strokePad = (tool) => lineWidthFor(tool) / 2 + 4;
   const alphaFor = () => state.alpha;
-  const isFreehand = (tool) => tool === 'pen' || tool === 'eraser';
 
   function hexToRgb(hex) {
     const n = parseInt(hex.slice(1), 16);
@@ -457,14 +524,14 @@
     return `rgb(${r}, ${g}, ${b})`;
   };
 
-  // 色ごとに「2倍解像度できめ細かい鉛筆の粒子スタンプ」を16種類キャッシュ（高密度・滑らか）
+  // 色・半径ごとに「2倍解像度できめ細かい鉛筆の粒子スタンプ」を16種類キャッシュ
   const pencilCache = new Map();
   function getPencilDabs(hex, radius) {
     const key = `${hex}_${radius}_${dpr}`;
     if (pencilCache.has(key)) return pencilCache.get(key);
     const VARIANTS = 16;
     const ss = dpr * 2; // 2倍オーバーサンプリングで粒子をきめ細かくする
-    const R = Math.ceil((radius + 1.0) * ss);
+    const R = Math.max(2, Math.ceil((radius + 1.0) * ss));
     const S = R * 2;
     const sheet = document.createElement('canvas');
     sheet.width = S * VARIANTS;
@@ -478,12 +545,13 @@
       seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5;
       return (seed >>> 0) / 4294967296;
     };
+    const denom = Math.max(0.5, radius * ss);
     for (let v = 0; v < VARIANTS; v++) {
       const ox = v * S;
       for (let y = 0; y < S; y++) {
         for (let x = 0; x < S; x++) {
-          const dx = (x + 0.5 - R) / (radius * ss);
-          const dy = (y + 0.5 - R) / (radius * ss);
+          const dx = (x + 0.5 - R) / denom;
+          const dy = (y + 0.5 - R) / denom;
           const dist = Math.hypot(dx, dy);
           if (dist > 1.08) continue;
           // 中心は高密度に色が乗り、フチはきめ細かく自然にかすれる鉛筆プロファイル
@@ -500,104 +568,282 @@
       }
     }
     sctx.putImageData(img, 0, 0);
-    // 文字用のきめ細かい紙目パターン（0.5倍スケールで高精細に適用）
-    const psz = 96;
-    const pcan = document.createElement('canvas');
-    pcan.width = psz; pcan.height = psz;
-    const patCtx = pcan.getContext('2d');
-    const pimg = patCtx.createImageData(psz, psz);
-    const pd = pimg.data;
-    for (let i = 0; i < psz * psz; i++) {
-      const a = rand() < 0.14 ? 0.65 : (0.84 + rand() * 0.16);
-      pd[i * 4] = cr; pd[i * 4 + 1] = cg; pd[i * 4 + 2] = cb;
-      pd[i * 4 + 3] = Math.round(a * 255);
-    }
-    patCtx.putImageData(pimg, 0, 0);
-    const textPattern = ctx.createPattern(pcan, 'repeat');
-    if (textPattern && textPattern.setTransform && typeof DOMMatrix !== 'undefined') {
-      textPattern.setTransform(new DOMMatrix().scale(0.5, 0.5));
-    }
-    const entry = { sheet, S, drawS: S / 2, drawR: R / 2, VARIANTS, textPattern };
+    const entry = { sheet, S, drawS: S / 2, drawR: R / 2, VARIANTS };
     pencilCache.set(key, entry);
     return entry;
   }
 
-  const PENCIL_STEP = 0.6; // スタンプ間隔を細かく高密度に（CSS px）
-  function stampDot(c, dabs, x, y, idx) {
+  // 文字用のきめ細かい紙目パターン
+  const textPatternCache = new Map();
+  function getTextPattern(hex, scaleFactor = 1) {
+    let p = textPatternCache.get(hex);
+    if (!p) {
+      const [cr, cg, cb] = pencilRgb(hex);
+      let seed = 135792468;
+      const rand = () => {
+        seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5;
+        return (seed >>> 0) / 4294967296;
+      };
+      const psz = 96;
+      const pcan = document.createElement('canvas');
+      pcan.width = psz; pcan.height = psz;
+      const patCtx = pcan.getContext('2d');
+      const pimg = patCtx.createImageData(psz, psz);
+      const pd = pimg.data;
+      for (let i = 0; i < psz * psz; i++) {
+        const a = rand() < 0.14 ? 0.65 : (0.84 + rand() * 0.16);
+        pd[i * 4] = cr; pd[i * 4 + 1] = cg; pd[i * 4 + 2] = cb;
+        pd[i * 4 + 3] = Math.round(a * 255);
+      }
+      patCtx.putImageData(pimg, 0, 0);
+      p = ctx.createPattern(pcan, 'repeat');
+      textPatternCache.set(hex, p);
+    }
+    if (p && p.setTransform && typeof DOMMatrix !== 'undefined') {
+      const s = 0.5 * Math.min(3, Math.max(0.5, scaleFactor));
+      p.setTransform(new DOMMatrix().scale(s, s));
+    }
+    return p || pencilColorCss(hex);
+  }
+
+  const PENCIL_STEP = 0.6; // スタンプ間隔を細かく高密度に（画面CSS px）
+  function stampDotScaled(c, dabs, dabScale, jitterScale, x, y, idx) {
     const h = ((idx * 2654435761) >>> 0);
     const v = h % dabs.VARIANTS;
-    const jx = (((h >>> 8) & 255) / 255 - 0.5) * 0.26 * dpr;
-    const jy = (((h >>> 16) & 255) / 255 - 0.5) * 0.26 * dpr;
+    const jx = (((h >>> 8) & 255) / 255 - 0.5) * 0.26 * jitterScale * dpr;
+    const jy = (((h >>> 16) & 255) / 255 - 0.5) * 0.26 * jitterScale * dpr;
+    const r = dabs.drawR * dabScale;
+    const s = dabs.drawS * dabScale;
     c.drawImage(dabs.sheet, v * dabs.S, 0, dabs.S, dabs.S,
-      x * dpr + jx - dabs.drawR, y * dpr + jy - dabs.drawR, dabs.drawS, dabs.drawS);
+      x * dpr + jx - r, y * dpr + jy - r, s, s);
   }
-  function stampSegment(c, dabs, x1, y1, x2, y2, st) {
+  function stampSegmentScaled(c, dabs, dabScale, step, jitterScale, x1, y1, x2, y2, st, clip) {
     const dx = x2 - x1, dy = y2 - y1;
     const len = Math.hypot(dx, dy);
     if (len === 0) return;
-    const ux = dx / len, uy = dy / len;
     let d = st.rem;
+    if (clip && (
+      (x1 < clip.minX && x2 < clip.minX) || (x1 > clip.maxX && x2 > clip.maxX) ||
+      (y1 < clip.minY && y2 < clip.minY) || (y1 > clip.maxY && y2 > clip.maxY)
+    )) {
+      if (d <= len) {
+        const n = Math.floor((len - d) / step) + 1;
+        st.idx += n;
+        d += n * step;
+      }
+      st.rem = d - len;
+      return;
+    }
+    const ux = dx / len, uy = dy / len;
     while (d <= len) {
-      stampDot(c, dabs, x1 + ux * d, y1 + uy * d, st.idx++);
-      d += PENCIL_STEP;
+      const px = x1 + ux * d, py = y1 + uy * d;
+      const idx = st.idx++;
+      if (!clip || (px >= clip.minX && px <= clip.maxX && py >= clip.minY && py <= clip.maxY)) {
+        stampDotScaled(c, dabs, dabScale, jitterScale, px, py, idx);
+      }
+      d += step;
     }
     st.rem = d - len;
   }
-  function stampQuad(c, dabs, p0, p1, p2, st) {
+  function stampQuadScaled(c, dabs, dabScale, step, quadStep, jitterScale, p0, p1, p2, st, clip) {
     const approx = Math.hypot(p1.x - p0.x, p1.y - p0.y) + Math.hypot(p2.x - p1.x, p2.y - p1.y);
-    const steps = Math.max(1, Math.ceil(approx / 1.5));
+    const steps = Math.max(1, Math.ceil(approx / quadStep));
     let px = p0.x, py = p0.y;
     for (let s = 1; s <= steps; s++) {
       const t = s / steps, mt = 1 - t;
       const nx = mt * mt * p0.x + 2 * mt * t * p1.x + t * t * p2.x;
       const ny = mt * mt * p0.y + 2 * mt * t * p1.y + t * t * p2.y;
-      stampSegment(c, dabs, px, py, nx, ny, st);
+      stampSegmentScaled(c, dabs, dabScale, step, jitterScale, px, py, nx, ny, st, clip);
       px = nx; py = ny;
     }
   }
 
-  function setupEraser(c) {
-    c.setTransform(dpr, 0, 0, dpr, 0, 0);
-    c.lineCap = 'round';
-    c.lineJoin = 'round';
-    c.lineWidth = lineWidthFor('eraser');
-    c.globalAlpha = 1;
-    c.globalCompositeOperation = 'destination-out';
+  function computeShapeEndpoints(tool, a, b, shift) {
+    let { x: x1, y: y1 } = a, { x: x2, y: y2 } = b;
+    if (shift) {
+      if (tool === 'line') {
+        const ang = Math.round(Math.atan2(y2 - y1, x2 - x1) / (Math.PI / 4)) * (Math.PI / 4);
+        const len = Math.hypot(x2 - x1, y2 - y1);
+        x2 = x1 + Math.cos(ang) * len; y2 = y1 + Math.sin(ang) * len;
+      } else {
+        const dd = Math.max(Math.abs(x2 - x1), Math.abs(y2 - y1));
+        x2 = x1 + Math.sign(x2 - x1 || 1) * dd; y2 = y1 + Math.sign(y2 - y1 || 1) * dd;
+      }
+    }
+    return { x1, y1, x2, y2 };
   }
 
-  // フリーハンド：前回描いた続きの区間だけを描く（なめらかな2次曲線＋えんぴつ粒子）
-  function renderFreehand(d, final) {
-    const pts = d.pts;
-    if (d.tool === 'eraser') {
-      setupEraser(ctx);
-      if (d.drawn === 0) {
-        ctx.beginPath();
-        ctx.arc(pts[0].x, pts[0].y, ctx.lineWidth / 2, 0, Math.PI * 2);
-        ctx.fill();
-        d.mid = pts[0];
-        d.drawn = 1;
-      }
-      if (pts.length > d.drawn || final) {
-        ctx.beginPath();
-        ctx.moveTo(d.mid.x, d.mid.y);
-        for (let i = d.drawn; i < pts.length; i++) {
-          const prev = pts[i - 1], cur = pts[i];
-          const mid = { x: (prev.x + cur.x) / 2, y: (prev.y + cur.y) / 2 };
-          ctx.quadraticCurveTo(prev.x, prev.y, mid.x, mid.y);
-          d.mid = mid;
-        }
-        if (final) {
-          const last = pts[pts.length - 1];
-          ctx.lineTo(last.x, last.y);
-        }
-        ctx.stroke();
-        d.drawn = pts.length;
-      }
+  const FONT_FAMILY = '"Segoe UI", "Yu Gothic UI", "Meiryo", "Noto Sans JP", sans-serif';
+  const TEXT_SIZE = 24; // 描画時の画面上での文字サイズ（px）
+  const TEXT_FONT = `${TEXT_SIZE}px ${FONT_FAMILY}`;
+
+  // 保存済みストロークを現在の表示領域(renderedView)へくっきり描画
+  function renderStrokeToViewport(s) {
+    const vx = renderedView.x, vy = renderedView.y, vz = renderedView.z;
+    const wLeft = -vx / vz, wTop = -vy / vz;
+    const wRight = (viewW - vx) / vz, wBottom = (viewH - vy) / vz;
+    const pad = (s.worldSize || s.worldFontSize || 0) + 6 / vz;
+    if (s.bounds.maxX + pad < wLeft || s.bounds.minX - pad > wRight ||
+        s.bounds.maxY + pad < wTop || s.bounds.minY - pad > wBottom) return;
+
+    if (s.tool === 'text') {
+      const scaleFactor = vz / s.baseZ;
+      const fs = s.worldFontSize * vz;
+      if (fs < 1.2) return;
+      ctx.save();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = s.alpha;
+      ctx.fillStyle = getTextPattern(s.color, scaleFactor);
+      ctx.font = `${fs}px ${FONT_FAMILY}`;
+      ctx.textBaseline = 'middle';
+      ctx.fillText(s.text, vx + s.p.x * vz, vy + s.p.y * vz);
+      ctx.restore();
       return;
     }
 
-    const dabs = getPencilDabs(state.color, lineWidthFor(d.tool) / 2);
+    const scaleFactor = vz / s.baseZ;
+    const screenR = (s.worldSize / 2) * vz;
+
+    // 大きく縮小して極細になった線は軽量なアンチエイリアスパスで描画
+    if (screenR < 0.6) {
+      const w = screenR * 2;
+      const drawW = Math.max(0.7, w);
+      ctx.save();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.strokeStyle = pencilColorCss(s.color);
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = drawW;
+      ctx.globalAlpha = s.alpha * 0.72 * (w < 0.7 ? Math.max(0.3, w / 0.7) : 1);
+      if (s.tool === 'pen') {
+        const pts = s.pts;
+        if (pts.length === 1) {
+          ctx.beginPath();
+          ctx.arc(vx + pts[0].x * vz, vy + pts[0].y * vz, drawW / 2, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          ctx.beginPath();
+          ctx.moveTo(vx + pts[0].x * vz, vy + pts[0].y * vz);
+          for (let i = 1; i < pts.length; i++) {
+            const prev = pts[i - 1], cur = pts[i];
+            ctx.quadraticCurveTo(
+              vx + prev.x * vz, vy + prev.y * vz,
+              vx + (prev.x + cur.x) * 0.5 * vz, vy + (prev.y + cur.y) * 0.5 * vz
+            );
+          }
+          const last = pts[pts.length - 1];
+          ctx.lineTo(vx + last.x * vz, vy + last.y * vz);
+          ctx.stroke();
+        }
+      } else {
+        const sx1 = vx + s.x1 * vz, sy1 = vy + s.y1 * vz;
+        const sx2 = vx + s.x2 * vz, sy2 = vy + s.y2 * vz;
+        ctx.beginPath();
+        if (Math.hypot(sx2 - sx1, sy2 - sy1) < 0.5) {
+          ctx.arc(sx1, sy1, drawW / 2, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (s.tool === 'line') {
+          ctx.moveTo(sx1, sy1); ctx.lineTo(sx2, sy2); ctx.stroke();
+        } else {
+          ctx.strokeRect(Math.min(sx1, sx2), Math.min(sy1, sy2), Math.abs(sx2 - sx1), Math.abs(sy2 - sy1));
+        }
+      }
+      ctx.restore();
+      return;
+    }
+
+    const dabR = Math.min(6, Math.max(0.6, Math.round(screenR * 4) / 4));
+    const dabs = getPencilDabs(s.color, dabR);
+    const dabScale = screenR / dabR;
+    const step = PENCIL_STEP * scaleFactor;
+    const quadStep = Math.min(8, 1.5 * scaleFactor);
+    const margin = screenR + 6;
+    const clip = { minX: -margin, minY: -margin, maxX: viewW + margin, maxY: viewH + margin };
+    const rect = worldBoundsToDeviceRect(s.bounds, margin);
+    if (!rect) return;
+
+    pctx.setTransform(1, 0, 0, 1, 0, 0);
+    pctx.clearRect(rect.x, rect.y, rect.w, rect.h);
+    pctx.imageSmoothingEnabled = true;
+    pctx.imageSmoothingQuality = 'high';
+    pctx.globalAlpha = 1;
+    pctx.globalCompositeOperation = 'source-over';
+
+    if (s.tool === 'pen') {
+      const pts = s.pts;
+      const st = { rem: 0, idx: 1 };
+      const p0 = { x: vx + pts[0].x * vz, y: vy + pts[0].y * vz };
+      for (let k = 0; k < 3; k++) {
+        const idx = st.idx++;
+        if (p0.x >= clip.minX && p0.x <= clip.maxX && p0.y >= clip.minY && p0.y <= clip.maxY) {
+          stampDotScaled(pctx, dabs, dabScale, scaleFactor, p0.x, p0.y, idx);
+        }
+      }
+      st.rem = step;
+      let mid = p0;
+      for (let i = 1; i < pts.length; i++) {
+        const prevW = pts[i - 1], curW = pts[i];
+        const prev = { x: vx + prevW.x * vz, y: vy + prevW.y * vz };
+        const nextMid = { x: vx + (prevW.x + curW.x) * 0.5 * vz, y: vy + (prevW.y + curW.y) * 0.5 * vz };
+        stampQuadScaled(pctx, dabs, dabScale, step, quadStep, scaleFactor, mid, prev, nextMid, st, clip);
+        mid = nextMid;
+      }
+      const lastW = pts[pts.length - 1];
+      stampSegmentScaled(pctx, dabs, dabScale, step, scaleFactor, mid.x, mid.y, vx + lastW.x * vz, vy + lastW.y * vz, st, clip);
+    } else {
+      const sx1 = vx + s.x1 * vz, sy1 = vy + s.y1 * vz;
+      const sx2 = vx + s.x2 * vz, sy2 = vy + s.y2 * vz;
+      const st = { rem: 0, idx: 1 };
+      if (Math.hypot(sx2 - sx1, sy2 - sy1) < 0.5 * scaleFactor) {
+        for (let k = 0; k < 3; k++) {
+          const idx = st.idx++;
+          if (sx1 >= clip.minX && sx1 <= clip.maxX && sy1 >= clip.minY && sy1 <= clip.maxY) {
+            stampDotScaled(pctx, dabs, dabScale, scaleFactor, sx1, sy1, idx);
+          }
+        }
+      } else if (s.tool === 'line') {
+        stampSegmentScaled(pctx, dabs, dabScale, step, scaleFactor, sx1, sy1, sx2, sy2, st, clip);
+      } else if (s.tool === 'rect') {
+        const rx0 = Math.min(sx1, sx2), ry0 = Math.min(sy1, sy2);
+        const rx1 = Math.max(sx1, sx2), ry1 = Math.max(sy1, sy2);
+        stampSegmentScaled(pctx, dabs, dabScale, step, scaleFactor, rx0, ry0, rx1, ry0, st, clip);
+        st.rem = 0; stampSegmentScaled(pctx, dabs, dabScale, step, scaleFactor, rx1, ry0, rx1, ry1, st, clip);
+        st.rem = 0; stampSegmentScaled(pctx, dabs, dabScale, step, scaleFactor, rx1, ry1, rx0, ry1, st, clip);
+        st.rem = 0; stampSegmentScaled(pctx, dabs, dabScale, step, scaleFactor, rx0, ry1, rx0, ry0, st, clip);
+      }
+    }
+
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = s.alpha;
+    ctx.drawImage(preview, rect.x, rect.y, rect.w, rect.h, rect.x, rect.y, rect.w, rect.h);
+    ctx.restore();
+    pctx.clearRect(rect.x, rect.y, rect.w, rect.h);
+  }
+
+  function renderAllStrokes() {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!viewW || !viewH || histIndex <= 0) return;
+    let startIdx = 0;
+    for (let i = histIndex - 1; i >= 0; i--) {
+      if (undoStack[i].tool === 'clear') { startIdx = i + 1; break; }
+    }
+    for (let i = startIdx; i < histIndex; i++) {
+      renderStrokeToViewport(undoStack[i]);
+    }
+  }
+
+  // --- ライブ描画（現在描いている途中の線：常に画面上の太さ state.size でくっきり描く） ---
+  const toScreen = (wp) => ({ x: renderedView.x + wp.x * renderedView.z, y: renderedView.y + wp.y * renderedView.z });
+
+  function renderFreehand(d, final) {
+    const pts = d.pts;
+    const dabs = getPencilDabs(d.color, state.size / 2);
     pctx.setTransform(1, 0, 0, 1, 0, 0);
     pctx.imageSmoothingEnabled = true;
     pctx.imageSmoothingQuality = 'high';
@@ -605,61 +851,25 @@
     pctx.globalCompositeOperation = 'source-over';
     if (d.drawn === 0) {
       d.pencil = { rem: 0, idx: 1 };
-      for (let k = 0; k < 3; k++) stampDot(pctx, dabs, pts[0].x, pts[0].y, d.pencil.idx++);
+      const s0 = toScreen(pts[0]);
+      for (let k = 0; k < 3; k++) stampDotScaled(pctx, dabs, 1, 1, s0.x, s0.y, d.pencil.idx++);
       d.pencil.rem = PENCIL_STEP;
-      d.mid = pts[0];
+      d.mid = s0;
       d.drawn = 1;
     }
     if (pts.length > d.drawn || final) {
       for (let i = d.drawn; i < pts.length; i++) {
-        const prev = pts[i - 1], cur = pts[i];
-        const mid = { x: (prev.x + cur.x) / 2, y: (prev.y + cur.y) / 2 };
-        stampQuad(pctx, dabs, d.mid, prev, mid, d.pencil);
+        const prev = toScreen(pts[i - 1]), cur = toScreen(pts[i]);
+        const mid = { x: (prev.x + cur.x) * 0.5, y: (prev.y + cur.y) * 0.5 };
+        stampQuadScaled(pctx, dabs, 1, PENCIL_STEP, 1.5, 1, d.mid, prev, mid, d.pencil, null);
         d.mid = mid;
       }
       if (final) {
-        const last = pts[pts.length - 1];
-        stampSegment(pctx, dabs, d.mid.x, d.mid.y, last.x, last.y, d.pencil);
+        const last = toScreen(pts[pts.length - 1]);
+        stampSegmentScaled(pctx, dabs, 1, PENCIL_STEP, 1, d.mid.x, d.mid.y, last.x, last.y, d.pencil, null);
       }
       d.drawn = pts.length;
     }
-  }
-
-  // 図形：えんぴつ粒子で直線・四角を描き、範囲（CSS座標）を返す
-  function drawShape(c, tool, a, b, shift) {
-    let { x: x1, y: y1 } = a, { x: x2, y: y2 } = b;
-    if (shift) {
-      if (tool === 'line') {
-        // 45度単位にスナップ
-        const ang = Math.round(Math.atan2(y2 - y1, x2 - x1) / (Math.PI / 4)) * (Math.PI / 4);
-        const len = Math.hypot(x2 - x1, y2 - y1);
-        x2 = x1 + Math.cos(ang) * len; y2 = y1 + Math.sin(ang) * len;
-      } else {
-        // 正方形・正円
-        const dd = Math.max(Math.abs(x2 - x1), Math.abs(y2 - y1));
-        x2 = x1 + Math.sign(x2 - x1 || 1) * dd; y2 = y1 + Math.sign(y2 - y1 || 1) * dd;
-      }
-    }
-    const dabs = getPencilDabs(state.color, lineWidthFor(tool) / 2);
-    c.setTransform(1, 0, 0, 1, 0, 0);
-    c.imageSmoothingEnabled = true;
-    c.imageSmoothingQuality = 'high';
-    c.globalAlpha = 1;
-    c.globalCompositeOperation = 'source-over';
-    const st = { rem: 0, idx: 1 };
-    if (Math.hypot(x2 - x1, y2 - y1) < 0.5) {
-      for (let k = 0; k < 3; k++) stampDot(c, dabs, x1, y1, st.idx++);
-    } else if (tool === 'line') {
-      stampSegment(c, dabs, x1, y1, x2, y2, st);
-    } else if (tool === 'rect') {
-      const rx0 = Math.min(x1, x2), ry0 = Math.min(y1, y2);
-      const rx1 = Math.max(x1, x2), ry1 = Math.max(y1, y2);
-      stampSegment(c, dabs, rx0, ry0, rx1, ry0, st);
-      st.rem = 0; stampSegment(c, dabs, rx1, ry0, rx1, ry1, st);
-      st.rem = 0; stampSegment(c, dabs, rx1, ry1, rx0, ry1, st);
-      st.rem = 0; stampSegment(c, dabs, rx0, ry1, rx0, ry0, st);
-    }
-    return { minX: Math.min(x1, x2), minY: Math.min(y1, y2), maxX: Math.max(x1, x2), maxY: Math.max(y1, y2) };
   }
 
   function renderShape(d) {
@@ -668,114 +878,34 @@
       pctx.setTransform(1, 0, 0, 1, 0, 0);
       pctx.clearRect(r.x, r.y, r.w, r.h);
     }
-    d.bounds = drawShape(pctx, d.tool, d.start, d.last, d.shift);
-    d.shapeRect = boundsToRect(d.bounds, strokePad(d.tool));
-  }
-
-  // --- 塗りつぶし（スキャンライン方式）：変更範囲の矩形を返す ---
-  function floodFill(px, py) {
-    const W = canvas.width, H = canvas.height;
-    const x0 = Math.floor(px * dpr), y0 = Math.floor(py * dpr);
-    if (x0 < 0 || y0 < 0 || x0 >= W || y0 >= H) return null;
-    const img = ctx.getImageData(0, 0, W, H);
-    const d = img.data;
-    const si = (y0 * W + x0) * 4;
-    const target = [d[si], d[si + 1], d[si + 2], d[si + 3]];
-    const [r, g, b] = hexToRgb(state.color);
-    const a = Math.round(state.alpha * 255);
-    if (target[0] === r && target[1] === g && target[2] === b && target[3] === a) return null;
-
-    const TOL = 48;
-    const visited = new Uint8Array(W * H);
-    let minX = x0, maxX = x0, minY = y0, maxY = y0;
-    const match = (p) => {
-      const i = p * 4;
-      return !visited[p] &&
-        Math.abs(d[i] - target[0]) <= TOL && Math.abs(d[i + 1] - target[1]) <= TOL &&
-        Math.abs(d[i + 2] - target[2]) <= TOL && Math.abs(d[i + 3] - target[3]) <= TOL;
+    const ep = computeShapeEndpoints(d.tool, d.start, d.last, d.shift);
+    d.ep = ep;
+    d.bounds = {
+      minX: Math.min(ep.x1, ep.x2), minY: Math.min(ep.y1, ep.y2),
+      maxX: Math.max(ep.x1, ep.x2), maxY: Math.max(ep.y1, ep.y2),
     };
-    const stack = [x0, y0];
-    while (stack.length) {
-      const y = stack.pop();
-      let x = stack.pop();
-      let p = y * W + x;
-      while (x > 0 && match(p - 1)) { x--; p--; }
-      let up = false, down = false;
-      if (x < minX) minX = x;
-      if (y < minY) minY = y;
-      if (y > maxY) maxY = y;
-      while (x < W && match(p)) {
-        const i = p * 4;
-        d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = a; visited[p] = 1;
-        if (y > 0) {
-          const m = match(p - W);
-          if (m && !up) { stack.push(x, y - 1); up = true; } else if (!m) up = false;
-        }
-        if (y < H - 1) {
-          const m = match(p + W);
-          if (m && !down) { stack.push(x, y + 1); down = true; } else if (!m) down = false;
-        }
-        x++; p++;
-      }
-      if (x - 1 > maxX) maxX = x - 1;
+    const sx1 = renderedView.x + ep.x1 * renderedView.z, sy1 = renderedView.y + ep.y1 * renderedView.z;
+    const sx2 = renderedView.x + ep.x2 * renderedView.z, sy2 = renderedView.y + ep.y2 * renderedView.z;
+    const dabs = getPencilDabs(d.color, state.size / 2);
+    pctx.setTransform(1, 0, 0, 1, 0, 0);
+    pctx.imageSmoothingEnabled = true;
+    pctx.imageSmoothingQuality = 'high';
+    pctx.globalAlpha = 1;
+    pctx.globalCompositeOperation = 'source-over';
+    const st = { rem: 0, idx: 1 };
+    if (Math.hypot(sx2 - sx1, sy2 - sy1) < 0.5) {
+      for (let k = 0; k < 3; k++) stampDotScaled(pctx, dabs, 1, 1, sx1, sy1, st.idx++);
+    } else if (d.tool === 'line') {
+      stampSegmentScaled(pctx, dabs, 1, PENCIL_STEP, 1, sx1, sy1, sx2, sy2, st, null);
+    } else if (d.tool === 'rect') {
+      const rx0 = Math.min(sx1, sx2), ry0 = Math.min(sy1, sy2);
+      const rx1 = Math.max(sx1, sx2), ry1 = Math.max(sy1, sy2);
+      stampSegmentScaled(pctx, dabs, 1, PENCIL_STEP, 1, rx0, ry0, rx1, ry0, st, null);
+      st.rem = 0; stampSegmentScaled(pctx, dabs, 1, PENCIL_STEP, 1, rx1, ry0, rx1, ry1, st, null);
+      st.rem = 0; stampSegmentScaled(pctx, dabs, 1, PENCIL_STEP, 1, rx1, ry1, rx0, ry1, st, null);
+      st.rem = 0; stampSegmentScaled(pctx, dabs, 1, PENCIL_STEP, 1, rx0, ry1, rx0, ry0, st, null);
     }
-
-    // --- 隙間対策：線のフチ（アンチエイリアスで半透明になった部分）の下にも色を敷く ---
-    // 塗った領域から数ピクセルだけ、線の部分へ広げる。
-    // 線の「下」に合成するので線の見た目は変わらず、完全に不透明な線は越えない（はみ出し防止）。
-    const R = Math.max(2, Math.round(2 * dpr));
-    const isTargetLike = (q) => {
-      const i = q * 4;
-      return Math.abs(d[i] - target[0]) <= TOL && Math.abs(d[i + 1] - target[1]) <= TOL &&
-        Math.abs(d[i + 2] - target[2]) <= TOL && Math.abs(d[i + 3] - target[3]) <= TOL;
-    };
-    const fa = a / 255;
-    let frontier = [];
-    // 最初の境界：塗った画素に隣接する、未塗りの画素
-    for (let y = minY; y <= maxY; y++) {
-      for (let x = minX; x <= maxX; x++) {
-        const q = y * W + x;
-        if (visited[q] !== 1) continue;
-        if (x > 0 && !visited[q - 1]) frontier.push(q - 1);
-        if (x < W - 1 && !visited[q + 1]) frontier.push(q + 1);
-        if (y > 0 && !visited[q - W]) frontier.push(q - W);
-        if (y < H - 1 && !visited[q + W]) frontier.push(q + W);
-      }
-    }
-    for (let step = 0; step < R && frontier.length; step++) {
-      const next = [];
-      for (const q of frontier) {
-        if (visited[q]) continue;
-        // 線の外側の「塗り対象と同じ色」の画素には広げない（はみ出し防止）
-        if (isTargetLike(q)) continue;
-        visited[q] = 2;
-        const i = q * 4;
-        const ea = d[i + 3] / 255;
-        // 既存の画素を上、塗り色を下にして合成（destination-over）
-        const oa = ea + fa * (1 - ea);
-        if (oa > 0 && ea < 1) {
-          const wf = fa * (1 - ea);
-          d[i] = Math.round((d[i] * ea + r * wf) / oa);
-          d[i + 1] = Math.round((d[i + 1] * ea + g * wf) / oa);
-          d[i + 2] = Math.round((d[i + 2] * ea + b * wf) / oa);
-          d[i + 3] = Math.round(oa * 255);
-        }
-        // 完全に不透明な画素（線の芯）より先へは広げない
-        if (ea >= 1) continue;
-        const x = q % W, y = (q - x) / W;
-        if (x < minX) minX = x; if (x > maxX) maxX = x;
-        if (y < minY) minY = y; if (y > maxY) maxY = y;
-        if (x > 0 && !visited[q - 1]) next.push(q - 1);
-        if (x < W - 1 && !visited[q + 1]) next.push(q + 1);
-        if (y > 0 && !visited[q - W]) next.push(q - W);
-        if (y < H - 1 && !visited[q + W]) next.push(q + W);
-      }
-      frontier = next;
-    }
-
-    const rect = clampRect(minX, minY, maxX - minX + 1, maxY - minY + 1);
-    ctx.putImageData(img, 0, 0, rect.x, rect.y, rect.w, rect.h); // 変更範囲だけ書き戻す
-    return rect;
+    d.shapeRect = worldBoundsToDeviceRect(d.bounds, state.size / 2 + 6);
   }
 
   // --- ポインター操作 ---
@@ -785,13 +915,16 @@
     rafId = requestAnimationFrame(() => {
       rafId = 0;
       if (!drawing) return;
-      if (isFreehand(drawing.tool)) renderFreehand(drawing, false);
+      if (drawing.tool === 'pen') renderFreehand(drawing, false);
       else renderShape(drawing);
     });
   }
 
-  // 画面座標 → キャンバス座標（下段の拡大率を考慮）
-  const getPos = (e, r) => ({ x: (e.clientX - r.left) / pan.z, y: (e.clientY - r.top) / pan.z });
+  // 画面座標 → ワールド座標（下段の移動量・拡大率を考慮）
+  const getWorldPos = (e, r) => ({
+    x: (e.clientX - r.left - pan.x) / pan.z,
+    y: (e.clientY - r.top - pan.y) / pan.z,
+  });
   function expand(b, p) {
     if (p.x < b.minX) b.minX = p.x; if (p.x > b.maxX) b.maxX = p.x;
     if (p.y < b.minY) b.minY = p.y; if (p.y > b.maxY) b.maxY = p.y;
@@ -801,7 +934,7 @@
   const panPointers = new Map(); // pointerId -> {x, y}（画面座標）
   let panGesture = null;
   let spaceDown = false;
-  let pendingFill = null;   // タッチの塗りつぶし（指を離すまで保留）
+  let pendingTap = null;    // 文字ツール（指を離すまで保留）
   let lastCanvasTap = 0;
   function panCenter() {
     let x = 0, y = 0;
@@ -812,12 +945,12 @@
     const [a, b] = panPointers.values();
     return Math.hypot(b.x - a.x, b.y - a.y) || 1;
   }
-  let canvasPanSpeed = PAN_SPEED; // 上段と同じ速度（マウス＝MOUSE_PAN_SPEED、指＝PAN_SPEED）
-  // 2本指で動かす時の速度：1 = 指に画像が吸い付くように動く（スマホで2本指移動を滑らかにする）
+  let canvasPanSpeed = PAN_SPEED;
   const TWO_FINGER_PAN_SPEED = 1.0;
   function startPan() {
-    // 反映待ちの移動があれば先に確定してから基準を取る（指の本数が変わった時に位置が跳ねないように）
+    if (textEdit) commitText();
     if (panRafId) { cancelAnimationFrame(panRafId); panRafId = 0; applyPan(); }
+    wrap.classList.add('panning');
     const c = panCenter();
     const multi = panPointers.size >= 2;
     panGesture = {
@@ -830,42 +963,33 @@
   }
   function endCanvasPan(e) {
     if (!panPointers.delete(e.pointerId)) return false;
-    if (panPointers.size) startPan(); // 指が減ったら基準を取り直す
-    else { panGesture = null; updateCursor(); }
+    if (panPointers.size) startPan();
+    else {
+      panGesture = null;
+      updateCursor();
+      syncRenderedView();
+    }
     return true;
   }
   // 描き始めの線を取り消す（2本指スワイプに切り替える時）
   function cancelDrawing() {
-    const d = drawing;
-    if (!d) return;
+    if (!drawing) return;
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
-    if (d.tool === 'eraser') {
-      // 消しゴムは本体に直接描いているので控えから復元
-      const r = boundsToRect(d.bounds, strokePad(d.tool));
-      if (r) {
-        ctx.save();
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.globalAlpha = 1;
-        ctx.clearRect(r.x, r.y, r.w, r.h);
-        ctx.drawImage(backup, r.x, r.y, r.w, r.h, r.x, r.y, r.w, r.h);
-        ctx.restore();
-      }
-    } else {
-      pctx.setTransform(1, 0, 0, 1, 0, 0);
-      pctx.clearRect(0, 0, preview.width, preview.height);
-    }
+    pctx.setTransform(1, 0, 0, 1, 0, 0);
+    pctx.clearRect(0, 0, preview.width, preview.height);
     preview.style.opacity = 1;
     drawing = null;
   }
 
   // --- 文字ツール：タップした場所に入力欄を出し、確定したらキャンバスに描く ---
-  const TEXT_SIZE = 24; // 文字の大きさ（キャンバス上のpx）
-  const TEXT_FONT = `${TEXT_SIZE}px "Segoe UI", "Yu Gothic UI", "Meiryo", "Noto Sans JP", sans-serif`;
   const measureCtx = document.createElement('canvas').getContext('2d');
-  let textEdit = null; // { input, p, color, opened }
+  let textEdit = null;
   function openText(p) {
     commitText();
+    if (renderedView.x !== pan.x || renderedView.y !== pan.y || renderedView.z !== pan.z) {
+      syncRenderedView();
+    }
+    const sx = pan.x + p.x * pan.z, sy = pan.y + p.y * pan.z;
     const input = document.createElement('input');
     input.type = 'text';
     input.id = 'textInput';
@@ -874,9 +998,8 @@
     input.style.fontSize = TEXT_SIZE + 'px';
     input.style.color = pencilColorCss(state.color);
     input.style.opacity = String(Math.min(1, state.alpha + 0.1));
-    // タップした点が文字の左端・縦中央になるように配置（padding 2px + 枠 1px 分ずらす）
-    input.style.left = (p.x - 3) + 'px';
-    input.style.top = (p.y - TEXT_SIZE * 0.625 - 1) + 'px';
+    input.style.left = (sx - 3) + 'px';
+    input.style.top = (sy - TEXT_SIZE * 0.625 - 1) + 'px';
     const fit = () => {
       measureCtx.font = TEXT_FONT;
       input.style.width = Math.ceil(measureCtx.measureText(input.value || 'あ').width + TEXT_SIZE * 0.6) + 'px';
@@ -884,17 +1007,16 @@
     fit();
     input.addEventListener('input', fit);
     input.addEventListener('keydown', (ev) => {
-      if (ev.isComposing) return; // 日本語変換中のEnterは確定に使わない
+      if (ev.isComposing) return;
       if (ev.key === 'Enter') { ev.preventDefault(); commitText(); }
       else if (ev.key === 'Escape') { ev.preventDefault(); commitText(true); }
     });
     input.addEventListener('blur', () => {
-      // 開いた直後のタップの余波でフォーカスが外れた場合は戻す
       if (textEdit && textEdit.input === input && performance.now() - textEdit.opened < 400) input.focus({ preventScroll: true });
       else commitText();
     });
     layer.appendChild(input);
-    textEdit = { input, p, color: state.color, opened: performance.now() };
+    textEdit = { input, p, color: state.color, alpha: state.alpha, baseZ: pan.z, opened: performance.now() };
     input.focus({ preventScroll: true });
   }
   function commitText(cancel) {
@@ -904,44 +1026,49 @@
     const text = t.input.value;
     t.input.remove();
     if (cancel || !text.trim()) return;
-    const dabs = getPencilDabs(t.color, lineWidthFor('pen') / 2);
-    ctx.save();
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.globalAlpha = state.alpha;
-    ctx.fillStyle = dabs.textPattern;
-    ctx.font = TEXT_FONT;
-    ctx.textBaseline = 'middle';
-    ctx.fillText(text, t.p.x, t.p.y);
-    const w = ctx.measureText(text).width;
-    ctx.restore();
-    commitHistory(boundsToRect(
-      { minX: t.p.x, maxX: t.p.x + w, minY: t.p.y - TEXT_SIZE * 0.75, maxY: t.p.y + TEXT_SIZE * 0.75 }, 4));
+    measureCtx.font = TEXT_FONT;
+    const screenW = measureCtx.measureText(text).width;
+    const worldFontSize = TEXT_SIZE / t.baseZ;
+    const worldW = screenW / t.baseZ;
+    const entry = {
+      tool: 'text',
+      p: t.p,
+      text,
+      color: t.color,
+      alpha: t.alpha,
+      worldFontSize,
+      baseZ: t.baseZ,
+      bounds: {
+        minX: t.p.x, maxX: t.p.x + worldW,
+        minY: t.p.y - worldFontSize * 0.75, maxY: t.p.y + worldFontSize * 0.75,
+      },
+    };
+    renderStrokeToViewport(entry);
+    pushHistory(entry);
   }
 
-  canvas.addEventListener('pointerdown', (e) => {
+  const captureWrap = (id) => { try { wrap.setPointerCapture(id); } catch (_) {} };
+
+  wrap.addEventListener('pointerdown', (e) => {
+    if (textEdit && e.target === textEdit.input) return;
     const isMouse = e.pointerType === 'mouse';
     const isTouch = e.pointerType === 'touch';
     if (isMouse && e.button !== 0 && e.button !== 1 && e.button !== 2) return;
-    // PC：マウスの中ボタン・右ボタンでドラッグすると画像を移動
     const mousePan = isMouse && (e.button === 1 || e.button === 2);
-    // 指で描いている／塗りつぶし待ちの最中に2本目の指が触れたら、スワイプ移動に切り替える
-    // （PCのスペース+ドラッグと同じように、いつでも移動できる。ペン入力中の手のひらは無視）
-    const firstTouch = drawing && drawing.pointerType === 'touch' ? drawing : pendingFill;
+    const firstTouch = drawing && drawing.pointerType === 'touch' ? drawing : pendingTap;
     const twoFinger = isTouch && !!firstTouch;
     if (panGesture || twoFinger || state.tool === 'hand' || spaceDown || mousePan) {
       e.preventDefault();
-      canvas.setPointerCapture(e.pointerId);
+      captureWrap(e.pointerId);
       canvasPanSpeed = isMouse ? MOUSE_PAN_SPEED : PAN_SPEED;
       if (twoFinger) {
         panPointers.set(firstTouch.id, firstTouch.client);
-        if (pendingFill) pendingFill = null;
-        else if (performance.now() - drawing.t0 < 300) cancelDrawing(); // 描き始めの誤線は取り消す
-        else finishDrawing(); // しっかり描いた線は残して確定
+        if (pendingTap) pendingTap = null;
+        else if (performance.now() - drawing.t0 < 300) cancelDrawing();
+        else finishDrawing();
       }
       panPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (panPointers.size === 1 && isTouch && state.tool === 'hand') {
-        // ✋ツールのダブルタップで位置リセット（PCのダブルクリックと同じ）
         const now = performance.now();
         if (now - lastCanvasTap < 300) { resetPan(); lastCanvasTap = 0; } else lastCanvasTap = now;
       }
@@ -949,52 +1076,42 @@
       return;
     }
     if (isMouse && e.button !== 0) return;
-    if (drawing || pendingFill) return; // 描画中のペン以外の入力・手のひらは無視
+    if (drawing || pendingTap) return;
     e.preventDefault();
-    // 文字を入力中にキャンバスをタップしたら、入力を確定するだけ
     if (textEdit) { commitText(); return; }
-    const rect = canvas.getBoundingClientRect(); // 描画中はキャッシュして使う
-    const p = getPos(e, rect);
+    if (renderedView.x !== pan.x || renderedView.y !== pan.y || renderedView.z !== pan.z) {
+      syncRenderedView();
+    }
+    const rect = wrap.getBoundingClientRect();
+    const p = getWorldPos(e, rect);
     const tool = state.tool;
 
     if (tool === 'text') {
-      // 2本指スワイプと区別するため、指（マウス）を離した時に入力欄を出す
-      canvas.setPointerCapture(e.pointerId);
-      pendingFill = { id: e.pointerId, p, tool, client: { x: e.clientX, y: e.clientY }, start: { x: e.clientX, y: e.clientY } };
+      captureWrap(e.pointerId);
+      pendingTap = { id: e.pointerId, p, tool, client: { x: e.clientX, y: e.clientY }, start: { x: e.clientX, y: e.clientY } };
       return;
     }
-    if (tool === 'fill') {
-      if (isTouch) {
-        // タッチは2本指スワイプと区別するため、指を離した時に塗る
-        canvas.setPointerCapture(e.pointerId);
-        pendingFill = { id: e.pointerId, p, client: { x: e.clientX, y: e.clientY }, start: { x: e.clientX, y: e.clientY } };
-      } else {
-        commitHistory(floodFill(p.x, p.y));
-      }
-      return;
-    }
-    canvas.setPointerCapture(e.pointerId);
+    captureWrap(e.pointerId);
     const snap = e.shiftKey || state.snap;
-    const mp = applyMagnet(p, tool);
+    const mp = applyMagnet(p, tool, pan.z);
     drawing = {
-      id: e.pointerId, tool, rect, pts: [mp], start: mp, last: mp, shift: snap,
-      drawn: 0, mid: mp, bounds: { minX: mp.x, minY: mp.y, maxX: mp.x, maxY: mp.y }, shapeRect: null,
+      id: e.pointerId, tool, rect, pts: [mp], start: mp, last: mp, ep: null, shift: snap,
+      color: state.color, alpha: alphaFor(), baseZ: pan.z,
+      drawn: 0, mid: null, bounds: { minX: mp.x, minY: mp.y, maxX: mp.x, maxY: mp.y }, shapeRect: null,
       pointerType: e.pointerType, t0: performance.now(), client: { x: e.clientX, y: e.clientY },
     };
-    preview.style.opacity = tool === 'eraser' ? 1 : alphaFor(tool);
-    if (isFreehand(tool)) renderFreehand(drawing, false);
+    preview.style.opacity = drawing.alpha;
+    if (tool === 'pen') renderFreehand(drawing, false);
   });
 
-  canvas.addEventListener('pointermove', (e) => {
+  wrap.addEventListener('pointermove', (e) => {
     if (panPointers.has(e.pointerId)) {
       panPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       const g = panGesture;
       const c = panCenter();
-      // 2本指なら指の間隔の変化で拡大縮小（ピンチ）
       let z = g.z;
       if (g.dist && panPointers.size >= 2) z = g.z * pointerDist() / g.dist;
       z = clampZoom(z);
-      // 開始時に指の中心にあった点が、移動後の中心に来るように
       const sx = g.sx - g.r.left, sy = g.sy - g.r.top;
       const lx = (sx - g.px) / g.z, ly = (sy - g.py) / g.z;
       pan.z = z;
@@ -1003,24 +1120,25 @@
       schedulePan();
       return;
     }
-    if (pendingFill && e.pointerId === pendingFill.id) {
-      pendingFill.client = { x: e.clientX, y: e.clientY };
+    if (pendingTap && e.pointerId === pendingTap.id) {
+      pendingTap.client = { x: e.clientX, y: e.clientY };
       return;
     }
     if (!drawing || e.pointerId !== drawing.id) return;
     const d = drawing;
     d.client = { x: e.clientX, y: e.clientY };
-    if (isFreehand(d.tool)) {
+    if (d.tool === 'pen') {
       const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+      const minDelta = 0.4 / d.baseZ; // 拡大率に合わせて画面上0.4px未満の細かすぎる点だけ間引く
       for (const ev of events) {
-        const p = applyMagnet(getPos(ev, d.rect), d.tool);
+        const p = getWorldPos(ev, d.rect);
         const last = d.pts[d.pts.length - 1];
-        if (Math.abs(p.x - last.x) + Math.abs(p.y - last.y) < 0.4) continue; // 細かすぎる点は間引く
+        if (Math.abs(p.x - last.x) + Math.abs(p.y - last.y) < minDelta) continue;
         d.pts.push(p);
         expand(d.bounds, p);
       }
     } else {
-      d.last = applyMagnet(getPos(e, d.rect), d.tool);
+      d.last = applyMagnet(getWorldPos(e, d.rect), d.tool, d.baseZ);
       d.shift = e.shiftKey || state.snap;
     }
     scheduleRender();
@@ -1028,13 +1146,12 @@
 
   function endDraw(e) {
     if (endCanvasPan(e)) return;
-    if (pendingFill && e.pointerId === pendingFill.id) {
-      const f = pendingFill;
-      pendingFill = null;
+    if (pendingTap && e.pointerId === pendingTap.id) {
+      const f = pendingTap;
+      pendingTap = null;
       const moved = Math.hypot(f.client.x - f.start.x, f.client.y - f.start.y);
       if (e.type === 'pointerup' && moved < 10) {
-        if (f.tool === 'text') openText(f.p);
-        else commitHistory(floodFill(f.p.x, f.p.y));
+        openText(f.p);
       }
       return;
     }
@@ -1046,19 +1163,18 @@
     const d = drawing;
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
     let rect;
-    if (isFreehand(d.tool)) {
+    if (d.tool === 'pen') {
       renderFreehand(d, true);
-      rect = boundsToRect(d.bounds, strokePad(d.tool));
+      rect = worldBoundsToDeviceRect(d.bounds, state.size / 2 + 6);
     } else {
       renderShape(d);
       rect = d.shapeRect;
     }
-    if (rect && d.tool !== 'eraser') {
-      // プレビューを1回だけ本体へ合成し、その範囲だけ消す
+    if (rect) {
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalCompositeOperation = 'source-over';
-      ctx.globalAlpha = alphaFor(d.tool);
+      ctx.globalAlpha = d.alpha;
       ctx.drawImage(preview, rect.x, rect.y, rect.w, rect.h, rect.x, rect.y, rect.w, rect.h);
       ctx.restore();
       pctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1066,36 +1182,51 @@
     }
     preview.style.opacity = 1;
     drawing = null;
-    commitHistory(rect);
+
+    const worldSize = state.size / d.baseZ;
+    if (d.tool === 'pen') {
+      pushHistory({
+        tool: 'pen', pts: d.pts, color: d.color, alpha: d.alpha,
+        worldSize, baseZ: d.baseZ, bounds: d.bounds,
+      });
+    } else {
+      const ep = d.ep || computeShapeEndpoints(d.tool, d.start, d.last, d.shift);
+      pushHistory({
+        tool: d.tool, x1: ep.x1, y1: ep.y1, x2: ep.x2, y2: ep.y2,
+        color: d.color, alpha: d.alpha, worldSize, baseZ: d.baseZ, bounds: d.bounds,
+      });
+    }
   }
-  canvas.addEventListener('pointerup', endDraw);
-  canvas.addEventListener('pointercancel', endDraw);
+  wrap.addEventListener('pointerup', endDraw);
+  wrap.addEventListener('pointercancel', endDraw);
+  // iOS Safariのピンチによるページ全体ズームを抑止
+  document.addEventListener('gesturestart', (e) => e.preventDefault(), { passive: false });
 
   // --- ツールバー ---
   const toolButtons = document.querySelectorAll('#toolGroup .tool');
   function updateCursor() {
     if (panGesture) return;
-    wrap.style.cursor = state.tool === 'hand' || spaceDown ? 'grab' : state.tool === 'text' ? 'text' : state.tool === 'fill' ? 'cell' : 'crosshair';
+    wrap.style.cursor = state.tool === 'hand' || spaceDown ? 'grab' : state.tool === 'text' ? 'text' : 'crosshair';
   }
   function setTool(t) {
-    commitText(); // 入力中の文字があれば確定
+    commitText();
     state.tool = t;
     toolButtons.forEach((b) => b.classList.toggle('active', b.dataset.tool === t));
     updateCursor();
   }
   toolButtons.forEach((b) => (b.onclick = () => setTool(b.dataset.tool)));
-  // ✋ツールでダブルクリック／ダブルタップすると位置をリセット
   wrap.addEventListener('dblclick', () => { if (state.tool === 'hand') resetPan(); });
   // 下段もホイールで拡大縮小（PC）
-  // 上段と同じ操作感：タッチパッド2本指スワイプ＝移動、ピンチ／マウスホイール＝拡大縮小
   wrap.addEventListener('wheel', (e) => {
     e.preventDefault();
     if (drawing) return;
+    if (textEdit) commitText();
     const r = wrap.getBoundingClientRect();
     if (!e.ctrlKey && isTouchpadWheel(e)) {
       pan.x -= e.deltaX * TOUCHPAD_PAN_SPEED;
       pan.y -= e.deltaY * TOUCHPAD_PAN_SPEED;
       applyPan();
+      scheduleWheelSync();
       return;
     }
     let dy = e.deltaY;
@@ -1103,18 +1234,16 @@
     else if (e.deltaMode === 2) dy *= 400;
     dy = Math.max(-100, Math.min(100, dy));
     const speed = e.ctrlKey ? PINCH_ZOOM_SPEED : WHEEL_ZOOM_SPEED;
-    zoomCanvasAt(Math.exp(-dy * speed), e.clientX - r.left, e.clientY - r.top);
+    zoomCanvasAt(Math.exp(-dy * speed), e.clientX - r.left, e.clientY - r.top, false);
   }, { passive: false });
-  const canvasCenterZoom = (f) => zoomCanvasAt(f, wrap.clientWidth / 2, wrap.clientHeight / 2);
+  const canvasCenterZoom = (f) => zoomCanvasAt(f, wrap.clientWidth / 2, wrap.clientHeight / 2, true);
   $('canvasZoomInBtn').onclick = () => canvasCenterZoom(1.25);
   $('canvasZoomOutBtn').onclick = () => canvasCenterZoom(0.8);
   canvasZoomLabel.onclick = resetPan;
 
-
   // 並び：赤、緑、青、紫、オレンジ、黄色、白、黒
   const PALETTE = ['#e53935', '#43a047', '#1e88e5', '#8e24aa', '#fb8c00', '#fdd835', '#ffffff', '#222222'];
   const paletteEl = $('palette');
-  // 選択中の色のサークルを白く囲む
   function selectColor(c) {
     state.color = c;
     paletteEl.querySelectorAll('.swatch').forEach((s) => s.classList.toggle('selected', s.dataset.color === c));
@@ -1130,26 +1259,27 @@
   });
   selectColor(state.color);
 
-
   $('undoBtn').onclick = undo;
   $('redoBtn').onclick = redo;
   $('clearBtn').onclick = () => {
+    commitText();
+    if (!hasVisibleStrokes()) return;
     if (!confirm('描いた内容をすべて消去しますか？')) return;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    commitHistory(clampRect(0, 0, canvas.width, canvas.height));
+    pushHistory({ tool: 'clear' });
+    renderAllStrokes();
   };
 
   function save() {
+    commitText();
+    syncRenderedView();
     // 表示領域ぶん（スワイプ・拡大した見た目のまま）を黒背景で書き出し
-    const w = Math.round(wrap.clientWidth * dpr), h = Math.round(wrap.clientHeight * dpr);
+    const w = canvas.width, h = canvas.height;
     const out = document.createElement('canvas');
     out.width = w; out.height = h;
     const o = out.getContext('2d');
     o.fillStyle = '#000';
     o.fillRect(0, 0, w, h);
-    o.imageSmoothingQuality = 'high';
-    o.drawImage(canvas, -pan.x / pan.z * dpr, -pan.y / pan.z * dpr, w / pan.z, h / pan.z, 0, 0, w, h);
+    o.drawImage(canvas, 0, 0);
     const base = images[currentIndex] ? images[currentIndex].name.split(/[\\/]/).pop().replace(/\.[^.]+$/, '') : 'drawing';
     const filename = `${base}_trace_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.png`;
     out.toBlob((blob) => {

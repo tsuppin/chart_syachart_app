@@ -90,11 +90,11 @@
         <button class="btn" id="overlayBtn" title="お手本を薄く重ねる (T)">👻<span class="txt"> 重ねる</span></button>
       </div>
       <div id="canvasWrap" class="stage">
-        <!-- スワイプで動かすレイヤー（重ね画像・描画キャンバスを一緒に移動） -->
+        <img id="overlayImage" alt="" draggable="false" />
+        <!-- スワイプで動かすレイヤー（方眼・描画キャンバスを一緒に移動） -->
         <div id="canvasLayer">
-          <img id="overlayImage" alt="" draggable="false" />
           <!-- 常時表示の薄い方眼（表示のみ・保存画像には含まれない） -->
-          <div id="paperGrid"></div>
+          <canvas id="paperGrid"></canvas>
           <canvas id="drawCanvas"></canvas>
           <canvas id="previewCanvas"></canvas>
         </div>

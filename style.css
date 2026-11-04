@@ -4,6 +4,7 @@ html, body {
   font-family: "Segoe UI", "Yu Gothic UI", "Meiryo", "Noto Sans JP", sans-serif;
   background: #1e2027; color: #e8e8ec;
   overscroll-behavior: none;          /* Androidの引っ張って更新を防ぐ */
+  touch-action: manipulation;         /* スマホでのボタン連打によるページ拡大を防ぐ */
   -webkit-tap-highlight-color: transparent;
 }
 #app {
@@ -69,7 +70,7 @@ input[type="range"] { width: 90px; }
 /* 選択中の色：サークルの周りを白く囲む（内側の黒い隙間で白い色でも分かる） */
 .swatch.selected { border-color: #000; box-shadow: 0 0 0 2px #fff; }
 @media (hover: hover) { .swatch:hover { transform: scale(1.15); } }
-#zoomLabel, #canvasZoomLabel { min-width: 38px; text-align: center; font-variant-numeric: tabular-nums; }
+#zoomLabel, #canvasZoomLabel { min-width: 48px; text-align: center; font-variant-numeric: tabular-nums; }
 
 /* ステージ */
 .stage { position: relative; flex: 1; overflow: hidden; }
@@ -83,7 +84,9 @@ input[type="range"] { width: 90px; }
   position: absolute; left: 0; top: 0; transform-origin: 0 0;
   user-select: none; pointer-events: none; display: none;
   image-rendering: auto;
-  will-change: transform; /* GPU合成で移動を滑らかに */
+}
+#viewer.dragging #refImage {
+  will-change: transform; /* ドラッグ・ピンチ中だけGPU合成し、停止時は高倍率でもくっきり再描画 */
 }
 .hint {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
@@ -93,24 +96,18 @@ input[type="range"] { width: 90px; }
 #canvasWrap { background: #000; cursor: crosshair; touch-action: none; contain: layout paint; /* 移動中の再計算を下段の中だけに閉じ込める */ }
 #canvasZoomLabel { cursor: pointer; }
 #canvasLayer {
-  position: absolute; left: 0; top: 0; transform-origin: 0 0;
-  will-change: transform; backface-visibility: hidden; /* GPU合成で2本指の移動を滑らかに */
+  position: absolute; inset: 0; transform-origin: 0 0;
+  backface-visibility: hidden;
 }
-#drawCanvas, #previewCanvas { position: absolute; left: 0; top: 0; }
-/* 下段の薄い方眼（キャンバスと一緒に移動・拡大する） */
-#paperGrid {
-  position: absolute; left: 0; top: 0; pointer-events: none;
-  background-image:
-    linear-gradient(to right, rgba(255, 255, 255, .10) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, .10) 1px, transparent 1px),
-    linear-gradient(to right, rgba(255, 255, 255, .05) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, .05) 1px, transparent 1px);
-  background-size: 50px 50px, 50px 50px, 10px 10px, 10px 10px;
-}
-#previewCanvas { pointer-events: none; }
+#drawCanvas, #previewCanvas, #paperGrid { position: absolute; left: 0; top: 0; }
+#paperGrid, #previewCanvas { pointer-events: none; }
 #overlayImage {
   position: absolute; left: 0; top: 0; transform-origin: 0 0;
   pointer-events: none; user-select: none; display: none; opacity: .3;
+}
+#canvasWrap.panning #canvasLayer,
+#canvasWrap.panning #overlayImage {
+  will-change: transform; /* スマホの2本指移動中はGPU合成で滑らかに、指を離したら高精細に再ラスタライズ */
 }
 body.show-overlay #overlayImage[src] { display: block; }
 
@@ -154,6 +151,10 @@ body.mobile .toolbar::-webkit-scrollbar { display: none; }
 body.mobile .toolbar > *, body.mobile .tool-group > * { flex-shrink: 0; }
 body.mobile .tool-group { flex-wrap: nowrap; }
 body.mobile .btn { min-width: 40px; min-height: 40px; justify-content: center; font-size: 16px; padding: 4px 8px; }
+body.mobile #zoomLabel, body.mobile #canvasZoomLabel {
+  min-width: 52px; min-height: 40px; padding: 0 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
 body.mobile select { min-height: 40px; max-width: 140px; font-size: 14px; }
 body.mobile .swatch { width: 28px; height: 28px; }
 body.mobile input[type="range"] { width: 100px; height: 28px; }
