@@ -268,7 +268,7 @@
     tool: 'pen',
     color: '#ffffff',
     size: 4,
-    alpha: 0.6,  // えんぴつ風の薄めの発色（重ね描きすると自然に濃くなる）
+    alpha: 0.85, // えんぴつ風の質感は残しつつ、しっかり見やすい濃さに
     snap: false, // スナップ（PCのShiftキーと同じ：直線45度・正方形・正円）
     magnet: true, // マグネット（方眼の線に吸い寄せる・常にオン）
   };
@@ -439,13 +439,13 @@
     const n = parseInt(hex.slice(1), 16);
     return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
   }
-  // 黒背景でも「薄めの色鉛筆・鉛筆」に見えるよう、鮮やかな色は少し白を混ぜてパステル寄りに柔らかくする
+  // 色鉛筆・鉛筆らしい自然な発色に整える
   function pencilRgb(hex) {
     let [r, g, b] = hexToRgb(hex);
     const lum = (r + g + b) / 3;
-    if (lum >= 245) return [232, 232, 236]; // 真っ白も少し落ち着いた鉛筆トーンに
+    if (lum >= 245) return [246, 246, 248];
     if (lum > 40) {
-      const mix = 0.32;
+      const mix = 0.12;
       r = Math.round(r + (255 - r) * mix);
       g = Math.round(g + (255 - g) * mix);
       b = Math.round(b + (255 - b) * mix);
@@ -485,11 +485,11 @@
           const dy = (y + 0.5 - R) / (radius * dpr);
           const dist = Math.hypot(dx, dy);
           if (dist > 1.15) continue;
-          // 中心は密度が高く、フチに向かってかすれる鉛筆の芯プロファイル
-          const profile = Math.max(0, 1 - dist * dist * 0.82);
+          // 中心はしっかり色が乗り、フチに向かってかすれる鉛筆の芯プロファイル
+          const profile = Math.max(0, 1 - dist * dist * 0.80);
           const n1 = rand(), n2 = rand();
-          if (n1 > profile * 0.74) continue; // 紙の凹み（色がつかない隙間）
-          const alpha = Math.min(1, profile * (0.22 + n2 * 0.38));
+          if (n1 > profile * 0.82) continue; // 紙の凹み（色がつかない隙間）
+          const alpha = Math.min(1, profile * (0.48 + n2 * 0.52));
           const idx = (y * sheet.width + ox + x) * 4;
           data[idx] = cr;
           data[idx + 1] = cg;
@@ -507,7 +507,7 @@
     const pimg = patCtx.createImageData(psz, psz);
     const pd = pimg.data;
     for (let i = 0; i < psz * psz; i++) {
-      const a = rand() < 0.22 ? 0.35 : (0.68 + rand() * 0.32);
+      const a = rand() < 0.18 ? 0.55 : (0.80 + rand() * 0.20);
       pd[i * 4] = cr; pd[i * 4 + 1] = cg; pd[i * 4 + 2] = cb;
       pd[i * 4 + 3] = Math.round(a * 255);
     }
@@ -517,7 +517,7 @@
     return entry;
   }
 
-  const PENCIL_STEP = 1.2; // スタンプ間隔（CSS px）
+  const PENCIL_STEP = 1.05; // スタンプ間隔（CSS px）
   function stampDot(c, dabs, x, y, idx) {
     const h = ((idx * 2654435761) >>> 0);
     const v = h % dabs.VARIANTS;
