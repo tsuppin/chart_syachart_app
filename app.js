@@ -457,13 +457,14 @@
     return `rgb(${r}, ${g}, ${b})`;
   };
 
-  // 色ごとに「紙の目に引っかかる鉛筆の粒子スタンプ」を16種類キャッシュ（スマホでも高速）
+  // 色ごとに「2倍解像度できめ細かい鉛筆の粒子スタンプ」を16種類キャッシュ（高密度・滑らか）
   const pencilCache = new Map();
   function getPencilDabs(hex, radius) {
     const key = `${hex}_${radius}_${dpr}`;
     if (pencilCache.has(key)) return pencilCache.get(key);
     const VARIANTS = 16;
-    const R = Math.ceil((radius + 1.5) * dpr);
+    const ss = dpr * 2; // 2倍オーバーサンプリングで粒子をきめ細かくする
+    const R = Math.ceil((radius + 1.0) * ss);
     const S = R * 2;
     const sheet = document.createElement('canvas');
     sheet.width = S * VARIANTS;
@@ -481,15 +482,15 @@
       const ox = v * S;
       for (let y = 0; y < S; y++) {
         for (let x = 0; x < S; x++) {
-          const dx = (x + 0.5 - R) / (radius * dpr);
-          const dy = (y + 0.5 - R) / (radius * dpr);
+          const dx = (x + 0.5 - R) / (radius * ss);
+          const dy = (y + 0.5 - R) / (radius * ss);
           const dist = Math.hypot(dx, dy);
-          if (dist > 1.15) continue;
-          // 中心はしっかり色が乗り、フチに向かってかすれる鉛筆の芯プロファイル
-          const profile = Math.max(0, 1 - dist * dist * 0.80);
+          if (dist > 1.08) continue;
+          // 中心は高密度に色が乗り、フチはきめ細かく自然にかすれる鉛筆プロファイル
+          const profile = Math.pow(Math.max(0, 1 - dist * dist * 0.85), 1.1);
           const n1 = rand(), n2 = rand();
-          if (n1 > profile * 0.82) continue; // 紙の凹み（色がつかない隙間）
-          const alpha = Math.min(1, profile * (0.48 + n2 * 0.52));
+          if (n1 > profile * 0.80) continue; // 微細な紙の目
+          const alpha = Math.min(1, profile * (0.28 + n2 * 0.38));
           const idx = (y * sheet.width + ox + x) * 4;
           data[idx] = cr;
           data[idx + 1] = cg;
@@ -499,32 +500,36 @@
       }
     }
     sctx.putImageData(img, 0, 0);
-    // 文字用の細かい紙目パターンも合わせて用意
-    const psz = 64;
+    // 文字用のきめ細かい紙目パターン（0.5倍スケールで高精細に適用）
+    const psz = 96;
     const pcan = document.createElement('canvas');
     pcan.width = psz; pcan.height = psz;
     const patCtx = pcan.getContext('2d');
     const pimg = patCtx.createImageData(psz, psz);
     const pd = pimg.data;
     for (let i = 0; i < psz * psz; i++) {
-      const a = rand() < 0.18 ? 0.55 : (0.80 + rand() * 0.20);
+      const a = rand() < 0.14 ? 0.65 : (0.84 + rand() * 0.16);
       pd[i * 4] = cr; pd[i * 4 + 1] = cg; pd[i * 4 + 2] = cb;
       pd[i * 4 + 3] = Math.round(a * 255);
     }
     patCtx.putImageData(pimg, 0, 0);
-    const entry = { sheet, S, R, VARIANTS, textPattern: ctx.createPattern(pcan, 'repeat') };
+    const textPattern = ctx.createPattern(pcan, 'repeat');
+    if (textPattern && textPattern.setTransform && typeof DOMMatrix !== 'undefined') {
+      textPattern.setTransform(new DOMMatrix().scale(0.5, 0.5));
+    }
+    const entry = { sheet, S, drawS: S / 2, drawR: R / 2, VARIANTS, textPattern };
     pencilCache.set(key, entry);
     return entry;
   }
 
-  const PENCIL_STEP = 1.05; // スタンプ間隔（CSS px）
+  const PENCIL_STEP = 0.6; // スタンプ間隔を細かく高密度に（CSS px）
   function stampDot(c, dabs, x, y, idx) {
     const h = ((idx * 2654435761) >>> 0);
     const v = h % dabs.VARIANTS;
-    const jx = (((h >>> 8) & 255) / 255 - 0.5) * 0.65 * dpr;
-    const jy = (((h >>> 16) & 255) / 255 - 0.5) * 0.65 * dpr;
+    const jx = (((h >>> 8) & 255) / 255 - 0.5) * 0.26 * dpr;
+    const jy = (((h >>> 16) & 255) / 255 - 0.5) * 0.26 * dpr;
     c.drawImage(dabs.sheet, v * dabs.S, 0, dabs.S, dabs.S,
-      x * dpr + jx - dabs.R, y * dpr + jy - dabs.R, dabs.S, dabs.S);
+      x * dpr + jx - dabs.drawR, y * dpr + jy - dabs.drawR, dabs.drawS, dabs.drawS);
   }
   function stampSegment(c, dabs, x1, y1, x2, y2, st) {
     const dx = x2 - x1, dy = y2 - y1;
@@ -540,7 +545,7 @@
   }
   function stampQuad(c, dabs, p0, p1, p2, st) {
     const approx = Math.hypot(p1.x - p0.x, p1.y - p0.y) + Math.hypot(p2.x - p1.x, p2.y - p1.y);
-    const steps = Math.max(1, Math.ceil(approx / 3));
+    const steps = Math.max(1, Math.ceil(approx / 1.5));
     let px = p0.x, py = p0.y;
     for (let s = 1; s <= steps; s++) {
       const t = s / steps, mt = 1 - t;
@@ -594,12 +599,13 @@
 
     const dabs = getPencilDabs(state.color, lineWidthFor(d.tool) / 2);
     pctx.setTransform(1, 0, 0, 1, 0, 0);
+    pctx.imageSmoothingEnabled = true;
+    pctx.imageSmoothingQuality = 'high';
     pctx.globalAlpha = 1;
     pctx.globalCompositeOperation = 'source-over';
     if (d.drawn === 0) {
       d.pencil = { rem: 0, idx: 1 };
-      stampDot(pctx, dabs, pts[0].x, pts[0].y, d.pencil.idx++);
-      stampDot(pctx, dabs, pts[0].x, pts[0].y, d.pencil.idx++);
+      for (let k = 0; k < 3; k++) stampDot(pctx, dabs, pts[0].x, pts[0].y, d.pencil.idx++);
       d.pencil.rem = PENCIL_STEP;
       d.mid = pts[0];
       d.drawn = 1;
@@ -636,11 +642,13 @@
     }
     const dabs = getPencilDabs(state.color, lineWidthFor(tool) / 2);
     c.setTransform(1, 0, 0, 1, 0, 0);
+    c.imageSmoothingEnabled = true;
+    c.imageSmoothingQuality = 'high';
     c.globalAlpha = 1;
     c.globalCompositeOperation = 'source-over';
     const st = { rem: 0, idx: 1 };
     if (Math.hypot(x2 - x1, y2 - y1) < 0.5) {
-      stampDot(c, dabs, x1, y1, st.idx++);
+      for (let k = 0; k < 3; k++) stampDot(c, dabs, x1, y1, st.idx++);
     } else if (tool === 'line') {
       stampSegment(c, dabs, x1, y1, x2, y2, st);
     } else if (tool === 'rect') {
@@ -1007,7 +1015,7 @@
       for (const ev of events) {
         const p = applyMagnet(getPos(ev, d.rect), d.tool);
         const last = d.pts[d.pts.length - 1];
-        if (Math.abs(p.x - last.x) + Math.abs(p.y - last.y) < 0.75) continue; // 細かすぎる点は間引く
+        if (Math.abs(p.x - last.x) + Math.abs(p.y - last.y) < 0.4) continue; // 細かすぎる点は間引く
         d.pts.push(p);
         expand(d.bounds, p);
       }
