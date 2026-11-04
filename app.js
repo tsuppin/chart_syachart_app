@@ -55,6 +55,7 @@
       dropHint.style.display = 'none';
       overlayImage.src = refImage.src;
       fitImage();
+      syncOverlay();
     };
     refImage.src = images[currentIndex].url;
   }
@@ -62,10 +63,18 @@
   function applyView() {
     const t = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
     refImage.style.transform = t;
-    // 下段の重ね画像も同じ画角に（下段のスワイプ移動にはレイヤーごと追従する）
-    overlayImage.style.transform =
-      `translate(${view.x + overlayOffset.x}px, ${view.y + overlayOffset.y}px) scale(${view.scale})`;
     setLabel(zoomLabel, Math.round(view.scale * 100) + '%');
+  }
+  // 下段の重ね画像は上段とは連動させない（上段を動かしても下段の重ね画像は動かない）
+  // 画像を読み込んだ時・重ね表示をオンにした時だけ、その時点の上段の画角に合わせる
+  const overlayView = { scale: 1, x: 0, y: 0 };
+  function syncOverlay() {
+    Object.assign(overlayView, view);
+    applyOverlay();
+  }
+  function applyOverlay() {
+    overlayImage.style.transform =
+      `translate(${overlayView.x + overlayOffset.x}px, ${overlayView.y + overlayOffset.y}px) scale(${overlayView.scale})`;
   }
   // 表示が変わる時だけ文字を書き換える（移動中に毎回書き換えるとレイアウト計算が走りカクつくため）
   function setLabel(el, text) {
@@ -347,7 +356,7 @@
       // 初回：中央が見えるように配置し、重ね画像の位置も合わせる
       overlayOffset.x = Math.round(wrap.clientWidth / 2);
       overlayOffset.y = Math.round(wrap.clientHeight / 2);
-      applyView();
+      applyOverlay();
       resetPan();
     } else {
       applyPan();
@@ -938,6 +947,7 @@
   function toggleOverlay(force) {
     const on = document.body.classList.toggle('show-overlay', force);
     overlayBtn.classList.toggle('active', on);
+    if (on) syncOverlay(); // 重ねた時点の上段の画角に合わせる（以降は上段と連動しない）
   }
   overlayBtn.onclick = () => toggleOverlay();
   overlayImage.style.opacity = 0.3; // 重ね画像の透明度（固定）
