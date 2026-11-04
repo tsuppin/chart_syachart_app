@@ -268,7 +268,7 @@
     tool: 'pen',
     color: '#ffffff',
     size: 4,
-    alpha: 1,
+    alpha: 0.6,  // えんぴつ風の薄めの発色（重ね描きすると自然に濃くなる）
     snap: false, // スナップ（PCのShiftキーと同じ：直線45度・正方形・正円）
     magnet: true, // マグネット（方眼の線に吸い寄せる・常にオン）
   };
@@ -429,54 +429,197 @@
     $('redoBtn').disabled = histIndex >= undoStack.length;
   }
 
-  // --- 描画ヘルパー ---
+  // --- 描画ヘルパー（えんぴつ風テクスチャ・薄めの発色） ---
   const lineWidthFor = (tool) => (tool === 'eraser' ? state.size * 3 : state.size);
+  const strokePad = (tool) => lineWidthFor(tool) / 2 + 4;
   const alphaFor = () => state.alpha;
   const isFreehand = (tool) => tool === 'pen' || tool === 'eraser';
 
-  function setupStroke(c, tool) {
+  function hexToRgb(hex) {
+    const n = parseInt(hex.slice(1), 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  // 黒背景でも「薄めの色鉛筆・鉛筆」に見えるよう、鮮やかな色は少し白を混ぜてパステル寄りに柔らかくする
+  function pencilRgb(hex) {
+    let [r, g, b] = hexToRgb(hex);
+    const lum = (r + g + b) / 3;
+    if (lum >= 245) return [232, 232, 236]; // 真っ白も少し落ち着いた鉛筆トーンに
+    if (lum > 40) {
+      const mix = 0.32;
+      r = Math.round(r + (255 - r) * mix);
+      g = Math.round(g + (255 - g) * mix);
+      b = Math.round(b + (255 - b) * mix);
+    }
+    return [r, g, b];
+  }
+  const pencilColorCss = (hex) => {
+    const [r, g, b] = pencilRgb(hex);
+    return `rgb(${r}, ${g}, ${b})`;
+  };
+
+  // 色ごとに「紙の目に引っかかる鉛筆の粒子スタンプ」を16種類キャッシュ（スマホでも高速）
+  const pencilCache = new Map();
+  function getPencilDabs(hex, radius) {
+    const key = `${hex}_${radius}_${dpr}`;
+    if (pencilCache.has(key)) return pencilCache.get(key);
+    const VARIANTS = 16;
+    const R = Math.ceil((radius + 1.5) * dpr);
+    const S = R * 2;
+    const sheet = document.createElement('canvas');
+    sheet.width = S * VARIANTS;
+    sheet.height = S;
+    const sctx = sheet.getContext('2d');
+    const img = sctx.createImageData(sheet.width, S);
+    const data = img.data;
+    const [cr, cg, cb] = pencilRgb(hex);
+    let seed = 2463534242;
+    const rand = () => {
+      seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5;
+      return (seed >>> 0) / 4294967296;
+    };
+    for (let v = 0; v < VARIANTS; v++) {
+      const ox = v * S;
+      for (let y = 0; y < S; y++) {
+        for (let x = 0; x < S; x++) {
+          const dx = (x + 0.5 - R) / (radius * dpr);
+          const dy = (y + 0.5 - R) / (radius * dpr);
+          const dist = Math.hypot(dx, dy);
+          if (dist > 1.15) continue;
+          // 中心は密度が高く、フチに向かってかすれる鉛筆の芯プロファイル
+          const profile = Math.max(0, 1 - dist * dist * 0.82);
+          const n1 = rand(), n2 = rand();
+          if (n1 > profile * 0.74) continue; // 紙の凹み（色がつかない隙間）
+          const alpha = Math.min(1, profile * (0.22 + n2 * 0.38));
+          const idx = (y * sheet.width + ox + x) * 4;
+          data[idx] = cr;
+          data[idx + 1] = cg;
+          data[idx + 2] = cb;
+          data[idx + 3] = Math.round(alpha * 255);
+        }
+      }
+    }
+    sctx.putImageData(img, 0, 0);
+    // 文字用の細かい紙目パターンも合わせて用意
+    const psz = 64;
+    const pcan = document.createElement('canvas');
+    pcan.width = psz; pcan.height = psz;
+    const patCtx = pcan.getContext('2d');
+    const pimg = patCtx.createImageData(psz, psz);
+    const pd = pimg.data;
+    for (let i = 0; i < psz * psz; i++) {
+      const a = rand() < 0.22 ? 0.35 : (0.68 + rand() * 0.32);
+      pd[i * 4] = cr; pd[i * 4 + 1] = cg; pd[i * 4 + 2] = cb;
+      pd[i * 4 + 3] = Math.round(a * 255);
+    }
+    patCtx.putImageData(pimg, 0, 0);
+    const entry = { sheet, S, R, VARIANTS, textPattern: ctx.createPattern(pcan, 'repeat') };
+    pencilCache.set(key, entry);
+    return entry;
+  }
+
+  const PENCIL_STEP = 1.2; // スタンプ間隔（CSS px）
+  function stampDot(c, dabs, x, y, idx) {
+    const h = ((idx * 2654435761) >>> 0);
+    const v = h % dabs.VARIANTS;
+    const jx = (((h >>> 8) & 255) / 255 - 0.5) * 0.65 * dpr;
+    const jy = (((h >>> 16) & 255) / 255 - 0.5) * 0.65 * dpr;
+    c.drawImage(dabs.sheet, v * dabs.S, 0, dabs.S, dabs.S,
+      x * dpr + jx - dabs.R, y * dpr + jy - dabs.R, dabs.S, dabs.S);
+  }
+  function stampSegment(c, dabs, x1, y1, x2, y2, st) {
+    const dx = x2 - x1, dy = y2 - y1;
+    const len = Math.hypot(dx, dy);
+    if (len === 0) return;
+    const ux = dx / len, uy = dy / len;
+    let d = st.rem;
+    while (d <= len) {
+      stampDot(c, dabs, x1 + ux * d, y1 + uy * d, st.idx++);
+      d += PENCIL_STEP;
+    }
+    st.rem = d - len;
+  }
+  function stampQuad(c, dabs, p0, p1, p2, st) {
+    const approx = Math.hypot(p1.x - p0.x, p1.y - p0.y) + Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    const steps = Math.max(1, Math.ceil(approx / 3));
+    let px = p0.x, py = p0.y;
+    for (let s = 1; s <= steps; s++) {
+      const t = s / steps, mt = 1 - t;
+      const nx = mt * mt * p0.x + 2 * mt * t * p1.x + t * t * p2.x;
+      const ny = mt * mt * p0.y + 2 * mt * t * p1.y + t * t * p2.y;
+      stampSegment(c, dabs, px, py, nx, ny, st);
+      px = nx; py = ny;
+    }
+  }
+
+  function setupEraser(c) {
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
     c.lineCap = 'round';
     c.lineJoin = 'round';
-    c.strokeStyle = state.color;
-    c.fillStyle = state.color;
-    c.lineWidth = lineWidthFor(tool);
-    c.globalAlpha = 1; // 濃さは確定時に適用
-    c.globalCompositeOperation = tool === 'eraser' ? 'destination-out' : 'source-over';
+    c.lineWidth = lineWidthFor('eraser');
+    c.globalAlpha = 1;
+    c.globalCompositeOperation = 'destination-out';
   }
 
-  // フリーハンド：前回描いた続きの区間だけを描く（なめらかな2次曲線）
+  // フリーハンド：前回描いた続きの区間だけを描く（なめらかな2次曲線＋えんぴつ粒子）
   function renderFreehand(d, final) {
-    const c = d.tool === 'eraser' ? ctx : pctx;
     const pts = d.pts;
-    setupStroke(c, d.tool);
+    if (d.tool === 'eraser') {
+      setupEraser(ctx);
+      if (d.drawn === 0) {
+        ctx.beginPath();
+        ctx.arc(pts[0].x, pts[0].y, ctx.lineWidth / 2, 0, Math.PI * 2);
+        ctx.fill();
+        d.mid = pts[0];
+        d.drawn = 1;
+      }
+      if (pts.length > d.drawn || final) {
+        ctx.beginPath();
+        ctx.moveTo(d.mid.x, d.mid.y);
+        for (let i = d.drawn; i < pts.length; i++) {
+          const prev = pts[i - 1], cur = pts[i];
+          const mid = { x: (prev.x + cur.x) / 2, y: (prev.y + cur.y) / 2 };
+          ctx.quadraticCurveTo(prev.x, prev.y, mid.x, mid.y);
+          d.mid = mid;
+        }
+        if (final) {
+          const last = pts[pts.length - 1];
+          ctx.lineTo(last.x, last.y);
+        }
+        ctx.stroke();
+        d.drawn = pts.length;
+      }
+      ctx.globalCompositeOperation = 'source-over';
+      return;
+    }
+
+    const dabs = getPencilDabs(state.color, lineWidthFor(d.tool) / 2);
+    pctx.setTransform(1, 0, 0, 1, 0, 0);
+    pctx.globalAlpha = 1;
+    pctx.globalCompositeOperation = 'source-over';
     if (d.drawn === 0) {
-      c.beginPath();
-      c.arc(pts[0].x, pts[0].y, c.lineWidth / 2, 0, Math.PI * 2);
-      c.fill();
+      d.pencil = { rem: 0, idx: 1 };
+      stampDot(pctx, dabs, pts[0].x, pts[0].y, d.pencil.idx++);
+      stampDot(pctx, dabs, pts[0].x, pts[0].y, d.pencil.idx++);
+      d.pencil.rem = PENCIL_STEP;
       d.mid = pts[0];
       d.drawn = 1;
     }
     if (pts.length > d.drawn || final) {
-      c.beginPath();
-      c.moveTo(d.mid.x, d.mid.y);
       for (let i = d.drawn; i < pts.length; i++) {
         const prev = pts[i - 1], cur = pts[i];
         const mid = { x: (prev.x + cur.x) / 2, y: (prev.y + cur.y) / 2 };
-        c.quadraticCurveTo(prev.x, prev.y, mid.x, mid.y);
+        stampQuad(pctx, dabs, d.mid, prev, mid, d.pencil);
         d.mid = mid;
       }
       if (final) {
         const last = pts[pts.length - 1];
-        c.lineTo(last.x, last.y);
+        stampSegment(pctx, dabs, d.mid.x, d.mid.y, last.x, last.y, d.pencil);
       }
-      c.stroke();
       d.drawn = pts.length;
     }
-    c.globalCompositeOperation = 'source-over';
   }
 
-  // 図形：描いた範囲（CSS座標）を返す
+  // 図形：えんぴつ粒子で直線・四角を描き、範囲（CSS座標）を返す
   function drawShape(c, tool, a, b, shift) {
     let { x: x1, y: y1 } = a, { x: x2, y: y2 } = b;
     if (shift) {
@@ -491,15 +634,23 @@
         x2 = x1 + Math.sign(x2 - x1 || 1) * dd; y2 = y1 + Math.sign(y2 - y1 || 1) * dd;
       }
     }
-    c.beginPath();
-    if (tool === 'line') {
-      c.moveTo(x1, y1); c.lineTo(x2, y2);
+    const dabs = getPencilDabs(state.color, lineWidthFor(tool) / 2);
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.globalAlpha = 1;
+    c.globalCompositeOperation = 'source-over';
+    const st = { rem: 0, idx: 1 };
+    if (Math.hypot(x2 - x1, y2 - y1) < 0.5) {
+      stampDot(c, dabs, x1, y1, st.idx++);
+    } else if (tool === 'line') {
+      stampSegment(c, dabs, x1, y1, x2, y2, st);
     } else if (tool === 'rect') {
-      c.rect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
-    } else if (tool === 'ellipse') {
-      c.ellipse((x1 + x2) / 2, (y1 + y2) / 2, Math.abs(x2 - x1) / 2, Math.abs(y2 - y1) / 2, 0, 0, Math.PI * 2);
+      const rx0 = Math.min(x1, x2), ry0 = Math.min(y1, y2);
+      const rx1 = Math.max(x1, x2), ry1 = Math.max(y1, y2);
+      stampSegment(c, dabs, rx0, ry0, rx1, ry0, st);
+      st.rem = 0; stampSegment(c, dabs, rx1, ry0, rx1, ry1, st);
+      st.rem = 0; stampSegment(c, dabs, rx1, ry1, rx0, ry1, st);
+      st.rem = 0; stampSegment(c, dabs, rx0, ry1, rx0, ry0, st);
     }
-    c.stroke();
     return { minX: Math.min(x1, x2), minY: Math.min(y1, y2), maxX: Math.max(x1, x2), maxY: Math.max(y1, y2) };
   }
 
@@ -509,16 +660,11 @@
       pctx.setTransform(1, 0, 0, 1, 0, 0);
       pctx.clearRect(r.x, r.y, r.w, r.h);
     }
-    setupStroke(pctx, d.tool);
     d.bounds = drawShape(pctx, d.tool, d.start, d.last, d.shift);
-    d.shapeRect = boundsToRect(d.bounds, lineWidthFor(d.tool) / 2 + 2);
+    d.shapeRect = boundsToRect(d.bounds, strokePad(d.tool));
   }
 
   // --- 塗りつぶし（スキャンライン方式）：変更範囲の矩形を返す ---
-  function hexToRgb(hex) {
-    const n = parseInt(hex.slice(1), 16);
-    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-  }
   function floodFill(px, py) {
     const W = canvas.width, H = canvas.height;
     const x0 = Math.floor(px * dpr), y0 = Math.floor(py * dpr);
@@ -687,7 +833,7 @@
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
     if (d.tool === 'eraser') {
       // 消しゴムは本体に直接描いているので控えから復元
-      const r = boundsToRect(d.bounds, lineWidthFor(d.tool) / 2 + 2);
+      const r = boundsToRect(d.bounds, strokePad(d.tool));
       if (r) {
         ctx.save();
         ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -718,7 +864,8 @@
     input.autocomplete = 'off';
     input.enterKeyHint = 'done';
     input.style.fontSize = TEXT_SIZE + 'px';
-    input.style.color = state.color;
+    input.style.color = pencilColorCss(state.color);
+    input.style.opacity = String(Math.min(1, state.alpha + 0.1));
     // タップした点が文字の左端・縦中央になるように配置（padding 2px + 枠 1px 分ずらす）
     input.style.left = (p.x - 3) + 'px';
     input.style.top = (p.y - TEXT_SIZE * 0.625 - 1) + 'px';
@@ -749,11 +896,12 @@
     const text = t.input.value;
     t.input.remove();
     if (cancel || !text.trim()) return;
+    const dabs = getPencilDabs(t.color, lineWidthFor('pen') / 2);
     ctx.save();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = state.alpha;
-    ctx.fillStyle = t.color;
+    ctx.fillStyle = dabs.textPattern;
     ctx.font = TEXT_FONT;
     ctx.textBaseline = 'middle';
     ctx.fillText(text, t.p.x, t.p.y);
@@ -892,7 +1040,7 @@
     let rect;
     if (isFreehand(d.tool)) {
       renderFreehand(d, true);
-      rect = boundsToRect(d.bounds, lineWidthFor(d.tool) / 2 + 2);
+      rect = boundsToRect(d.bounds, strokePad(d.tool));
     } else {
       renderShape(d);
       rect = d.shapeRect;
