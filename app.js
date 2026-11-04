@@ -705,6 +705,64 @@
     drawing = null;
   }
 
+  // --- 文字ツール：タップした場所に入力欄を出し、確定したらキャンバスに描く ---
+  const TEXT_SIZE = 24; // 文字の大きさ（キャンバス上のpx）
+  const TEXT_FONT = `${TEXT_SIZE}px "Segoe UI", "Yu Gothic UI", "Meiryo", "Noto Sans JP", sans-serif`;
+  const measureCtx = document.createElement('canvas').getContext('2d');
+  let textEdit = null; // { input, p, color, opened }
+  function openText(p) {
+    commitText();
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.id = 'textInput';
+    input.autocomplete = 'off';
+    input.enterKeyHint = 'done';
+    input.style.fontSize = TEXT_SIZE + 'px';
+    input.style.color = state.color;
+    // タップした点が文字の左端・縦中央になるように配置（padding 2px + 枠 1px 分ずらす）
+    input.style.left = (p.x - 3) + 'px';
+    input.style.top = (p.y - TEXT_SIZE * 0.625 - 1) + 'px';
+    const fit = () => {
+      measureCtx.font = TEXT_FONT;
+      input.style.width = Math.ceil(measureCtx.measureText(input.value || 'あ').width + TEXT_SIZE * 0.6) + 'px';
+    };
+    fit();
+    input.addEventListener('input', fit);
+    input.addEventListener('keydown', (ev) => {
+      if (ev.isComposing) return; // 日本語変換中のEnterは確定に使わない
+      if (ev.key === 'Enter') { ev.preventDefault(); commitText(); }
+      else if (ev.key === 'Escape') { ev.preventDefault(); commitText(true); }
+    });
+    input.addEventListener('blur', () => {
+      // 開いた直後のタップの余波でフォーカスが外れた場合は戻す
+      if (textEdit && textEdit.input === input && performance.now() - textEdit.opened < 400) input.focus({ preventScroll: true });
+      else commitText();
+    });
+    layer.appendChild(input);
+    textEdit = { input, p, color: state.color, opened: performance.now() };
+    input.focus({ preventScroll: true });
+  }
+  function commitText(cancel) {
+    const t = textEdit;
+    if (!t) return;
+    textEdit = null;
+    const text = t.input.value;
+    t.input.remove();
+    if (cancel || !text.trim()) return;
+    ctx.save();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = state.alpha;
+    ctx.fillStyle = t.color;
+    ctx.font = TEXT_FONT;
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, t.p.x, t.p.y);
+    const w = ctx.measureText(text).width;
+    ctx.restore();
+    commitHistory(boundsToRect(
+      { minX: t.p.x, maxX: t.p.x + w, minY: t.p.y - TEXT_SIZE * 0.75, maxY: t.p.y + TEXT_SIZE * 0.75 }, 4));
+  }
+
   canvas.addEventListener('pointerdown', (e) => {
     const isMouse = e.pointerType === 'mouse';
     const isTouch = e.pointerType === 'touch';
@@ -737,10 +795,18 @@
     if (isMouse && e.button !== 0) return;
     if (drawing || pendingFill) return; // 描画中のペン以外の入力・手のひらは無視
     e.preventDefault();
+    // 文字を入力中にキャンバスをタップしたら、入力を確定するだけ
+    if (textEdit) { commitText(); return; }
     const rect = canvas.getBoundingClientRect(); // 描画中はキャッシュして使う
     const p = getPos(e, rect);
     const tool = state.tool;
 
+    if (tool === 'text') {
+      // 2本指スワイプと区別するため、指（マウス）を離した時に入力欄を出す
+      canvas.setPointerCapture(e.pointerId);
+      pendingFill = { id: e.pointerId, p, tool, client: { x: e.clientX, y: e.clientY }, start: { x: e.clientX, y: e.clientY } };
+      return;
+    }
     if (tool === 'fill') {
       if (isTouch) {
         // タッチは2本指スワイプと区別するため、指を離した時に塗る
@@ -810,7 +876,10 @@
       const f = pendingFill;
       pendingFill = null;
       const moved = Math.hypot(f.client.x - f.start.x, f.client.y - f.start.y);
-      if (e.type === 'pointerup' && moved < 10) commitHistory(floodFill(f.p.x, f.p.y));
+      if (e.type === 'pointerup' && moved < 10) {
+        if (f.tool === 'text') openText(f.p);
+        else commitHistory(floodFill(f.p.x, f.p.y));
+      }
       return;
     }
     if (!drawing || e.pointerId !== drawing.id) return;
@@ -850,9 +919,10 @@
   const toolButtons = document.querySelectorAll('#toolGroup .tool');
   function updateCursor() {
     if (panGesture) return;
-    wrap.style.cursor = state.tool === 'hand' || spaceDown ? 'grab' : state.tool === 'fill' ? 'cell' : 'crosshair';
+    wrap.style.cursor = state.tool === 'hand' || spaceDown ? 'grab' : state.tool === 'text' ? 'text' : state.tool === 'fill' ? 'cell' : 'crosshair';
   }
   function setTool(t) {
+    commitText(); // 入力中の文字があれば確定
     state.tool = t;
     toolButtons.forEach((b) => b.classList.toggle('active', b.dataset.tool === t));
     updateCursor();
@@ -997,7 +1067,7 @@
       else if (k === 's') { e.preventDefault(); save(); }
       return;
     }
-    const map = { p: 'pen', l: 'line', r: 'rect', o: 'ellipse', f: 'fill', h: 'hand' };
+    const map = { p: 'pen', l: 'line', r: 'rect', a: 'text', h: 'hand' };
     if (e.key === ' ') {
       // スペースを押している間はドラッグで下段を移動
       e.preventDefault();

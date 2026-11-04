@@ -63,12 +63,21 @@
         <div id="palette"></div>
         <span class="sep"></span>
         <div class="tool-group" id="toolGroup">
-          <button class="btn tool active" data-tool="pen" title="ペン (P)">🖊<span class="txt"> ペン</span></button>
-          <button class="btn tool" data-tool="rect" title="四角 (R)">▭<span class="txt"> 四角</span></button>
-          <button class="btn tool" data-tool="line" title="直線 (L)">／<span class="txt"> 直線</span></button>
-          <button class="btn tool" data-tool="ellipse" title="円 (O)">◯<span class="txt"> 円</span></button>
-          <button class="btn tool" data-tool="fill" title="塗りつぶし (F)">🪣<span class="txt"> 塗り</span></button>
-          <button class="btn tool" data-tool="hand" title="移動 (H) ／ 2本指・スペース+ドラッグでも移動、ダブルクリックで位置リセット">✋<span class="txt"> 移動</span></button>
+          <button class="btn tool active" data-tool="pen" title="ペン (P)">
+            <svg viewBox="0 0 24 24"><path d="M4 20l4.2-1 10.3-10.3a2.1 2.1 0 0 0-3-3L5.2 16 4 20z"/><path d="M13.5 7.5l3 3"/></svg>
+          </button>
+          <button class="btn tool" data-tool="line" title="直線 (L)">
+            <svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>
+          </button>
+          <button class="btn tool" data-tool="rect" title="四角 (R)">
+            <svg viewBox="0 0 24 24"><rect x="5.5" y="5.5" width="13" height="13" rx="1.5"/></svg>
+          </button>
+          <button class="btn tool" data-tool="text" title="文字 (A) ／ タップした場所に文字を入力">
+            <svg viewBox="0 0 24 24"><path d="M6.5 19L12 5l5.5 14M8.6 14h6.8"/></svg>
+          </button>
+          <button class="btn tool" data-tool="hand" title="移動 (H) ／ 2本指・スペース+ドラッグでも移動、ダブルクリックで位置リセット">
+            <svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M12 3l-2.5 2.5M12 3l2.5 2.5M12 21l-2.5-2.5M12 21l2.5-2.5M3 12l2.5-2.5M3 12l2.5 2.5M21 12l-2.5-2.5M21 12l-2.5 2.5"/></svg>
+          </button>
         </div>
         <span class="sep"></span>
         <button class="btn" id="canvasZoomOutBtn" title="縮小（2本指ピンチ・ホイールでも可）">－</button>
