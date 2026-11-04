@@ -65,7 +65,11 @@
     // 下段の重ね画像も同じ画角に（下段のスワイプ移動にはレイヤーごと追従する）
     overlayImage.style.transform =
       `translate(${view.x + overlayOffset.x}px, ${view.y + overlayOffset.y}px) scale(${view.scale})`;
-    zoomLabel.textContent = Math.round(view.scale * 100) + '%';
+    setLabel(zoomLabel, Math.round(view.scale * 100) + '%');
+  }
+  // 表示が変わる時だけ文字を書き換える（移動中に毎回書き換えるとレイアウト計算が走りカクつくため）
+  function setLabel(el, text) {
+    if (el.textContent !== text) el.textContent = text;
   }
 
   function fitImage() {
@@ -153,11 +157,14 @@
   const touches = new Map(); // pointerId -> {x, y}
   let gesture = null;
   let viewerPanSpeed = PAN_SPEED;
+  let viewRafId = 0;
   const localPt = (e) => {
     const r = viewer.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   };
   function startGesture() {
+    // 反映待ちの移動があれば先に確定（指の本数が変わった時に位置が跳ねないように）
+    if (viewRafId) { cancelAnimationFrame(viewRafId); viewRafId = 0; applyView(); }
     const pts = [...touches.values()];
     if (pts.length === 1) {
       gesture = { type: 'pan', sx: pts[0].x, sy: pts[0].y, ox: view.x, oy: view.y };
@@ -195,7 +202,8 @@
       view.y = cy - (gesture.cy - gesture.oy) * k;
       view.scale = ns;
     }
-    applyView();
+    // 1フレーム1回にまとめて反映
+    if (!viewRafId) viewRafId = requestAnimationFrame(() => { viewRafId = 0; applyView(); });
   });
   let lastTap = 0;
   const endPan = (e) => {
@@ -284,8 +292,14 @@
     const minX = Math.min(0, wrap.clientWidth - cssW * pan.z), minY = Math.min(0, wrap.clientHeight - cssH * pan.z);
     pan.x = Math.min(0, Math.max(minX, pan.x));
     pan.y = Math.min(0, Math.max(minY, pan.y));
-    layer.style.transform = `translate(${pan.x}px, ${pan.y}px) scale(${pan.z})`;
-    canvasZoomLabel.textContent = Math.round(pan.z * 100) + '%';
+    layer.style.transform = `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${pan.z})`;
+    setLabel(canvasZoomLabel, Math.round(pan.z * 100) + '%');
+  }
+  // スワイプ中の再描画は1フレーム1回にまとめる（指の移動イベントは1フレームに何回も来るため）
+  let panRafId = 0;
+  function schedulePan() {
+    if (panRafId) return;
+    panRafId = requestAnimationFrame(() => { panRafId = 0; applyPan(); });
   }
   // 表示領域内の点 (cx, cy) を中心に拡大縮小
   function zoomCanvasAt(factor, cx, cy) {
@@ -636,13 +650,18 @@
     return Math.hypot(b.x - a.x, b.y - a.y) || 1;
   }
   let canvasPanSpeed = PAN_SPEED; // 上段と同じ速度（マウス＝MOUSE_PAN_SPEED、指＝PAN_SPEED）
+  // 2本指で動かす時の速度：1 = 指に画像が吸い付くように動く（スマホで2本指移動を滑らかにする）
+  const TWO_FINGER_PAN_SPEED = 1.0;
   function startPan() {
+    // 反映待ちの移動があれば先に確定してから基準を取る（指の本数が変わった時に位置が跳ねないように）
+    if (panRafId) { cancelAnimationFrame(panRafId); panRafId = 0; applyPan(); }
     const c = panCenter();
+    const multi = panPointers.size >= 2;
     panGesture = {
       sx: c.x, sy: c.y, px: pan.x, py: pan.y, z: pan.z,
       r: wrap.getBoundingClientRect(),
-      dist: panPointers.size >= 2 ? pointerDist() : 0,
-      speed: canvasPanSpeed,
+      dist: multi ? pointerDist() : 0,
+      speed: multi ? TWO_FINGER_PAN_SPEED : canvasPanSpeed,
     };
     wrap.style.cursor = 'grabbing';
   }
@@ -750,7 +769,7 @@
       pan.z = z;
       pan.x = sx + (c.x - g.sx) * g.speed - lx * z;
       pan.y = sy + (c.y - g.sy) * g.speed - ly * z;
-      applyPan();
+      schedulePan();
       return;
     }
     if (pendingFill && e.pointerId === pendingFill.id) {

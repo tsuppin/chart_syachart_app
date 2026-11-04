@@ -72,9 +72,12 @@ input[type="range"] { width: 90px; }
   text-align: center; color: #8a90a2; font-size: 16px; line-height: 1.8; pointer-events: none;
 }
 
-#canvasWrap { background: #000; cursor: crosshair; touch-action: none; }
+#canvasWrap { background: #000; cursor: crosshair; touch-action: none; contain: layout paint; /* 移動中の再計算を下段の中だけに閉じ込める */ }
 #canvasZoomLabel { cursor: pointer; }
-#canvasLayer { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
+#canvasLayer {
+  position: absolute; left: 0; top: 0; transform-origin: 0 0;
+  will-change: transform; backface-visibility: hidden; /* GPU合成で2本指の移動を滑らかに */
+}
 #drawCanvas, #previewCanvas { position: absolute; left: 0; top: 0; }
 /* 下段の薄い方眼（キャンバスと一緒に移動・拡大する） */
 #paperGrid {
