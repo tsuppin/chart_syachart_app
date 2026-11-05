@@ -268,7 +268,7 @@
   const state = {
     tool: 'pen',
     color: '#ffffff',
-    size: 4,
+    size: 8, // デフォルトの線の太さ（従来の4pxから2倍の8px）
     alpha: 0.85, // えんぴつ風の質感は残しつつ、しっかり見やすい濃さに
     snap: false, // スナップ（PCのShiftキーと同じ：直線45度・正方形）
     magnet: true, // マグネット（方眼の線に吸い寄せる・常にオン）
@@ -608,7 +608,8 @@
     return p || pencilColorCss(hex);
   }
 
-  const PENCIL_STEP = 0.6; // スタンプ間隔を細かく高密度に（画面CSS px）
+  // 線の半径に応じたスタンプ間隔（太さを変えても鉛筆の粒状感・濃さが自然になるよう調整）
+  const pencilStepFor = (radius) => Math.min(2.0, Math.max(0.5, radius * 0.28));
   function stampDotScaled(c, dabs, dabScale, jitterScale, x, y, idx) {
     const h = ((idx * 2654435761) >>> 0);
     const v = h % dabs.VARIANTS;
@@ -757,10 +758,11 @@
       return;
     }
 
-    const dabR = Math.min(6, Math.max(0.6, Math.round(screenR * 4) / 4));
+    const dabR = Math.min(18, Math.max(0.6, Math.round(screenR * 4) / 4));
     const dabs = getPencilDabs(s.color, dabR);
     const dabScale = screenR / dabR;
-    const step = PENCIL_STEP * scaleFactor;
+    const baseR = (s.worldSize * s.baseZ) / 2;
+    const step = pencilStepFor(baseR) * scaleFactor;
     const quadStep = Math.min(8, 1.5 * scaleFactor);
     const margin = screenR + 6;
     const clip = { minX: -margin, minY: -margin, maxX: viewW + margin, maxY: viewH + margin };
@@ -845,7 +847,9 @@
 
   function renderFreehand(d, final) {
     const pts = d.pts;
-    const dabs = getPencilDabs(d.color, state.size / 2);
+    const r = d.size / 2;
+    const step = pencilStepFor(r);
+    const dabs = getPencilDabs(d.color, r);
     pctx.setTransform(1, 0, 0, 1, 0, 0);
     pctx.imageSmoothingEnabled = true;
     pctx.imageSmoothingQuality = 'high';
@@ -855,7 +859,7 @@
       d.pencil = { rem: 0, idx: 1 };
       const s0 = toScreen(pts[0]);
       for (let k = 0; k < 3; k++) stampDotScaled(pctx, dabs, 1, 1, s0.x, s0.y, d.pencil.idx++);
-      d.pencil.rem = PENCIL_STEP;
+      d.pencil.rem = step;
       d.mid = s0;
       d.drawn = 1;
     }
@@ -863,12 +867,12 @@
       for (let i = d.drawn; i < pts.length; i++) {
         const prev = toScreen(pts[i - 1]), cur = toScreen(pts[i]);
         const mid = { x: (prev.x + cur.x) * 0.5, y: (prev.y + cur.y) * 0.5 };
-        stampQuadScaled(pctx, dabs, 1, PENCIL_STEP, 1.5, 1, d.mid, prev, mid, d.pencil, null);
+        stampQuadScaled(pctx, dabs, 1, step, 1.5, 1, d.mid, prev, mid, d.pencil, null);
         d.mid = mid;
       }
       if (final) {
         const last = toScreen(pts[pts.length - 1]);
-        stampSegmentScaled(pctx, dabs, 1, PENCIL_STEP, 1, d.mid.x, d.mid.y, last.x, last.y, d.pencil, null);
+        stampSegmentScaled(pctx, dabs, 1, step, 1, d.mid.x, d.mid.y, last.x, last.y, d.pencil, null);
       }
       d.drawn = pts.length;
     }
@@ -876,9 +880,9 @@
 
   function renderShape(d) {
     if (d.shapeRect) {
-      const r = d.shapeRect;
+      const r0 = d.shapeRect;
       pctx.setTransform(1, 0, 0, 1, 0, 0);
-      pctx.clearRect(r.x, r.y, r.w, r.h);
+      pctx.clearRect(r0.x, r0.y, r0.w, r0.h);
     }
     const ep = computeShapeEndpoints(d.tool, d.start, d.last, d.shift);
     d.ep = ep;
@@ -888,7 +892,9 @@
     };
     const sx1 = renderedView.x + ep.x1 * renderedView.z, sy1 = renderedView.y + ep.y1 * renderedView.z;
     const sx2 = renderedView.x + ep.x2 * renderedView.z, sy2 = renderedView.y + ep.y2 * renderedView.z;
-    const dabs = getPencilDabs(d.color, state.size / 2);
+    const r = d.size / 2;
+    const step = pencilStepFor(r);
+    const dabs = getPencilDabs(d.color, r);
     pctx.setTransform(1, 0, 0, 1, 0, 0);
     pctx.imageSmoothingEnabled = true;
     pctx.imageSmoothingQuality = 'high';
@@ -898,16 +904,16 @@
     if (Math.hypot(sx2 - sx1, sy2 - sy1) < 0.5) {
       for (let k = 0; k < 3; k++) stampDotScaled(pctx, dabs, 1, 1, sx1, sy1, st.idx++);
     } else if (d.tool === 'line') {
-      stampSegmentScaled(pctx, dabs, 1, PENCIL_STEP, 1, sx1, sy1, sx2, sy2, st, null);
+      stampSegmentScaled(pctx, dabs, 1, step, 1, sx1, sy1, sx2, sy2, st, null);
     } else if (d.tool === 'rect') {
       const rx0 = Math.min(sx1, sx2), ry0 = Math.min(sy1, sy2);
       const rx1 = Math.max(sx1, sx2), ry1 = Math.max(sy1, sy2);
-      stampSegmentScaled(pctx, dabs, 1, PENCIL_STEP, 1, rx0, ry0, rx1, ry0, st, null);
-      st.rem = 0; stampSegmentScaled(pctx, dabs, 1, PENCIL_STEP, 1, rx1, ry0, rx1, ry1, st, null);
-      st.rem = 0; stampSegmentScaled(pctx, dabs, 1, PENCIL_STEP, 1, rx1, ry1, rx0, ry1, st, null);
-      st.rem = 0; stampSegmentScaled(pctx, dabs, 1, PENCIL_STEP, 1, rx0, ry1, rx0, ry0, st, null);
+      stampSegmentScaled(pctx, dabs, 1, step, 1, rx0, ry0, rx1, ry0, st, null);
+      st.rem = 0; stampSegmentScaled(pctx, dabs, 1, step, 1, rx1, ry0, rx1, ry1, st, null);
+      st.rem = 0; stampSegmentScaled(pctx, dabs, 1, step, 1, rx1, ry1, rx0, ry1, st, null);
+      st.rem = 0; stampSegmentScaled(pctx, dabs, 1, step, 1, rx0, ry1, rx0, ry0, st, null);
     }
-    d.shapeRect = worldBoundsToDeviceRect(d.bounds, state.size / 2 + 6);
+    d.shapeRect = worldBoundsToDeviceRect(d.bounds, r + 6);
   }
 
   // --- ポインター操作 ---
@@ -1098,7 +1104,7 @@
     const mp = applyMagnet(p, tool, pan.z);
     drawing = {
       id: e.pointerId, tool, rect, pts: [mp], start: mp, last: mp, ep: null, shift: snap,
-      color: state.color, alpha: alphaFor(), baseZ: pan.z,
+      color: state.color, size: state.size, alpha: alphaFor(), baseZ: pan.z,
       drawn: 0, mid: null, bounds: { minX: mp.x, minY: mp.y, maxX: mp.x, maxY: mp.y }, shapeRect: null,
       pointerType: e.pointerType, t0: performance.now(), client: { x: e.clientX, y: e.clientY },
     };
@@ -1167,7 +1173,7 @@
     let rect;
     if (d.tool === 'pen') {
       renderFreehand(d, true);
-      rect = worldBoundsToDeviceRect(d.bounds, state.size / 2 + 6);
+      rect = worldBoundsToDeviceRect(d.bounds, d.size / 2 + 6);
     } else {
       renderShape(d);
       rect = d.shapeRect;
@@ -1185,7 +1191,7 @@
     preview.style.opacity = 1;
     drawing = null;
 
-    const worldSize = state.size / d.baseZ;
+    const worldSize = d.size / d.baseZ;
     if (d.tool === 'pen') {
       pushHistory({
         tool: 'pen', pts: d.pts, color: d.color, alpha: d.alpha,
@@ -1238,10 +1244,43 @@
     const speed = e.ctrlKey ? PINCH_ZOOM_SPEED : WHEEL_ZOOM_SPEED;
     zoomCanvasAt(Math.exp(-dy * speed), e.clientX - r.left, e.clientY - r.top, false);
   }, { passive: false });
-  const canvasCenterZoom = (f) => zoomCanvasAt(f, wrap.clientWidth / 2, wrap.clientHeight / 2, true);
-  $('canvasZoomInBtn').onclick = () => canvasCenterZoom(1.25);
-  $('canvasZoomOutBtn').onclick = () => canvasCenterZoom(0.8);
   if (canvasZoomLabel) canvasZoomLabel.onclick = resetPan;
+
+  // --- 線の太さ調整（－ / ＋ ボタン） ---
+  const STROKE_SIZES = [1, 2, 4, 6, 8, 10, 12, 16, 20, 24, 30];
+  const sizeDownBtn = $('sizeDownBtn');
+  const sizeUpBtn = $('sizeUpBtn');
+  const sizeIndicator = $('sizeIndicator');
+  const sizeDot = $('sizeDot');
+  const sizeVal = $('sizeVal');
+  let sizeHideTimer = 0;
+
+  function syncSizeUI(flash = false) {
+    const idx = STROKE_SIZES.indexOf(state.size);
+    if (sizeDownBtn) sizeDownBtn.disabled = idx <= 0;
+    if (sizeUpBtn) sizeUpBtn.disabled = idx >= STROKE_SIZES.length - 1;
+    if (sizeVal) sizeVal.textContent = `${state.size}px`;
+    if (sizeDot) {
+      const d = Math.min(16, Math.max(3, state.size));
+      sizeDot.style.width = `${d}px`;
+      sizeDot.style.height = `${d}px`;
+      sizeDot.style.background = state.color;
+    }
+    if (flash && sizeIndicator) {
+      sizeIndicator.classList.add('visible');
+      if (sizeHideTimer) clearTimeout(sizeHideTimer);
+      sizeHideTimer = setTimeout(() => sizeIndicator.classList.remove('visible'), 1200);
+    }
+  }
+  function stepStrokeSize(dir) {
+    let idx = STROKE_SIZES.findIndex((v) => v >= state.size);
+    if (idx === -1) idx = STROKE_SIZES.length - 1;
+    const nextIdx = Math.min(STROKE_SIZES.length - 1, Math.max(0, idx + dir));
+    state.size = STROKE_SIZES[nextIdx];
+    syncSizeUI(true);
+  }
+  if (sizeDownBtn) sizeDownBtn.onclick = () => stepStrokeSize(-1);
+  if (sizeUpBtn) sizeUpBtn.onclick = () => stepStrokeSize(1);
 
   // 並び：赤、緑、青、紫、オレンジ、黄色、白、黒
   const PALETTE = ['#ff4d4f', '#2ecc71', '#3498db', '#9b59b6', '#e67e22', '#f1c40f', '#ffffff', '#1e1e1e'];
@@ -1249,6 +1288,7 @@
   function selectColor(c) {
     state.color = c;
     paletteEl.querySelectorAll('.swatch').forEach((s) => s.classList.toggle('selected', s.dataset.color === c));
+    if (sizeDot) sizeDot.style.background = c;
   }
   PALETTE.forEach((c) => {
     const s = document.createElement('span');
@@ -1260,6 +1300,7 @@
     paletteEl.appendChild(s);
   });
   selectColor(state.color);
+  syncSizeUI(false);
 
   // 下段の方眼グリッド表示切替
   const paperGridBtn = $('paperGridBtn');

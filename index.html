@@ -79,15 +79,19 @@
           <div id="palette"></div>
         </div>
 
-        <!-- 2段目：左に拡大縮小、右に重ねる・透過率・保存・グリッド・元に戻す・全消去 -->
+        <!-- 2段目：左に線の太さ調整（－／＋）、右に重ねる・透過率・保存・グリッド・元に戻す・全消去 -->
         <div class="draw-row draw-row-sub">
-          <div class="zoom-group">
-            <button class="dt-btn zoom-btn" id="canvasZoomOutBtn" title="縮小（2本指ピンチ・ホイールでも可）">
+          <div class="size-group">
+            <button class="dt-btn size-btn" id="sizeDownBtn" title="線を細くする">
               <svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg>
             </button>
-            <button class="dt-btn zoom-btn" id="canvasZoomInBtn" title="拡大（2本指ピンチ・ホイールでも可）">
+            <button class="dt-btn size-btn" id="sizeUpBtn" title="線を太くする">
               <svg viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg>
             </button>
+            <span id="sizeIndicator" class="size-indicator" aria-live="polite">
+              <span id="sizeDot" class="size-dot"></span>
+              <span id="sizeVal">8</span>
+            </span>
           </div>
 
           <div class="action-group">
