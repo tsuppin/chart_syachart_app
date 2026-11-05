@@ -165,31 +165,6 @@ html, body {
 }
 @media (hover: hover) { .dt-btn.act-clear:hover { background: #592c31; } }
 
-/* 透過率調整ポップオーバー */
-.opacity-popover {
-  position: fixed; z-index: 50;
-  display: flex; flex-direction: column; gap: 8px;
-  padding: 10px 12px; min-width: 220px;
-  background: #251f2d; border: 1px solid #8668a8; border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, .55); color: #e8def8; font-size: 12px;
-  user-select: none;
-}
-.opacity-popover-row { display: flex; align-items: center; gap: 8px; }
-.opacity-popover-title { color: #c99eff; font-weight: 600; white-space: nowrap; }
-#overlayAlphaRange { flex: 1; width: 120px; accent-color: #a874f8; cursor: pointer; }
-#opacityPopoverVal {
-  min-width: 36px; text-align: right; font-weight: 700; color: #ffffff;
-  font-variant-numeric: tabular-nums;
-}
-.opacity-presets { display: flex; gap: 6px; }
-.preset-chip {
-  flex: 1; padding: 4px 0; border-radius: 5px;
-  background: #352942; border: 1px solid #5e4975; color: #d8c2f8;
-  font-size: 12px; font-weight: 600; cursor: pointer;
-}
-.preset-chip.active { background: #7b4ec2; border-color: #b288f8; color: #fff; }
-@media (hover: hover) { .preset-chip:hover { filter: brightness(1.12); } }
-
 /* 文字ツールの入力欄（キャンバス上に表示） */
 #textInput {
   position: absolute; z-index: 5; margin: 0; padding: 0 2px; min-width: 2em;

@@ -1356,78 +1356,28 @@
   const overlayBtn = $('overlayBtn');
   const opacityBtn = $('opacityBtn');
   const opacityLabel = $('opacityLabel');
-  const opacityPopover = $('opacityPopover');
-  const overlayAlphaRange = $('overlayAlphaRange');
-  const opacityPopoverVal = $('opacityPopoverVal');
-  const presetChips = opacityPopover ? opacityPopover.querySelectorAll('.preset-chip') : [];
-  let overlayAlpha = 40; // 初期透過率 40%
+  let overlayAlpha = 40; // 初期値 40%（押すたびに10%刻みで下がり、10%の次は100%へループ）
 
   function setOverlayAlpha(val) {
-    overlayAlpha = Math.min(95, Math.max(5, Math.round(Number(val) || 40)));
+    overlayAlpha = val;
     overlayImage.style.opacity = overlayAlpha / 100;
-    const labelText = `透過 ${overlayAlpha}%`;
-    if (opacityLabel) opacityLabel.textContent = labelText;
-    if (opacityPopoverVal) opacityPopoverVal.textContent = `${overlayAlpha}%`;
-    if (overlayAlphaRange) overlayAlphaRange.value = overlayAlpha;
-    presetChips.forEach((chip) => {
-      chip.classList.toggle('active', Number(chip.dataset.alpha) === overlayAlpha);
-    });
+    if (opacityLabel) opacityLabel.textContent = `透過 ${overlayAlpha}%`;
   }
 
-  function closeOpacityPopover() {
-    if (opacityPopover) opacityPopover.hidden = true;
-  }
-
-  function openOpacityPopover() {
-    if (!opacityPopover || !opacityBtn || opacityBtn.hidden) return;
-    opacityPopover.hidden = false;
-    const r = opacityBtn.getBoundingClientRect();
-    const pw = opacityPopover.offsetWidth || 220;
-    const ph = opacityPopover.offsetHeight || 78;
-    const left = Math.max(8, Math.min(window.innerWidth - pw - 8, r.left + r.width / 2 - pw / 2));
-    const top = (r.bottom + 6 + ph <= window.innerHeight - 8)
-      ? r.bottom + 6
-      : Math.max(8, r.top - ph - 6);
-    opacityPopover.style.left = `${Math.round(left)}px`;
-    opacityPopover.style.top = `${Math.round(top)}px`;
-  }
-
-  function toggleOverlay(force, showSlider = false) {
+  function toggleOverlay(force) {
     const on = document.body.classList.toggle('show-overlay', force);
     overlayBtn.classList.toggle('active', on);
     if (opacityBtn) opacityBtn.hidden = !on;
-    if (on) {
-      syncOverlay(); // 重ねた時点の上段の画角に合わせる（以降は上段と連動しない）
-      if (showSlider) requestAnimationFrame(openOpacityPopover);
-    } else {
-      closeOpacityPopover();
-    }
+    if (on) syncOverlay(); // 重ねた時点の上段の画角に合わせる（以降は上段と連動しない）
   }
 
-  overlayBtn.onclick = () => {
-    const turningOn = !document.body.classList.contains('show-overlay');
-    toggleOverlay(turningOn, turningOn);
-  };
+  overlayBtn.onclick = () => toggleOverlay();
   if (opacityBtn) {
     opacityBtn.onclick = () => {
-      if (opacityPopover && !opacityPopover.hidden) closeOpacityPopover();
-      else openOpacityPopover();
+      const next = overlayAlpha <= 10 ? 100 : overlayAlpha - 10;
+      setOverlayAlpha(next);
     };
   }
-  if (overlayAlphaRange) {
-    overlayAlphaRange.addEventListener('input', (e) => setOverlayAlpha(e.target.value));
-  }
-  presetChips.forEach((chip) => {
-    chip.onclick = () => setOverlayAlpha(chip.dataset.alpha);
-  });
-  document.addEventListener('pointerdown', (e) => {
-    if (!opacityPopover || opacityPopover.hidden) return;
-    if (opacityPopover.contains(e.target) ||
-        (opacityBtn && opacityBtn.contains(e.target)) ||
-        overlayBtn.contains(e.target)) return;
-    closeOpacityPopover();
-  }, true);
-  window.addEventListener('resize', closeOpacityPopover);
   setOverlayAlpha(overlayAlpha);
 
   /* ---------------------------------------------------------
