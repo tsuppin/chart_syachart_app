@@ -1383,11 +1383,13 @@
   /* ---------------------------------------------------------
    * 3. グリッド・仕切り・ショートカット
    * ------------------------------------------------------- */
+  const gridToggle = $('gridToggle');
   const gridSize = $('gridSize');
   const updateGrid = () => {
     document.querySelectorAll('.grid-overlay').forEach((g) => g.style.setProperty('--g', gridSize.value + 'px'));
   };
-  $('gridToggle').onchange = (e) => document.body.classList.toggle('show-grid', e.target.checked);
+  gridToggle.onchange = (e) => document.body.classList.toggle('show-grid', e.target.checked);
+  document.body.classList.toggle('show-grid', gridToggle.checked);
   gridSize.oninput = updateGrid;
   updateGrid();
 

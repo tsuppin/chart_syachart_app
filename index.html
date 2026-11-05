@@ -15,7 +15,7 @@
   <link rel="apple-touch-icon" href="icon.svg" />
   <link rel="stylesheet" href="style.css" />
 </head>
-<body>
+<body class="show-grid">
   <div id="app">
     <!-- ===== 上段：お手本画像 ===== -->
     <section id="topPane" class="pane">
@@ -38,7 +38,7 @@
         <button class="btn" id="zoomInBtn" title="拡大">＋</button>
         <button class="btn" id="fitBtn" title="全体表示">⤢<span class="txt"> 全体</span></button>
         <span class="sep"></span>
-        <label class="chk"><input type="checkbox" id="gridToggle" /> グリッド</label>
+        <label class="chk"><input type="checkbox" id="gridToggle" checked /> グリッド</label>
         <input type="range" id="gridSize" min="20" max="200" value="50" title="グリッド間隔" />
       </div>
       <div id="viewer" class="stage">
@@ -129,7 +129,6 @@
           <canvas id="drawCanvas"></canvas>
           <canvas id="previewCanvas"></canvas>
         </div>
-        <div class="grid-overlay"></div>
       </div>
     </section>
   </div>

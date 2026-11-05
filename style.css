@@ -234,10 +234,8 @@ body.show-overlay #overlayImage[src] { display: block; }
     calc(var(--g) / 5) calc(var(--g) / 5),
     calc(var(--g) / 5) calc(var(--g) / 5);
 }
-body.show-grid .grid-overlay { display: block; }
-body.show-grid #paperGrid { display: none; }
-#canvasWrap.hide-grid #paperGrid,
-#canvasWrap.hide-grid .grid-overlay { display: none; }
+body.show-grid #viewer .grid-overlay { display: block; }
+#canvasWrap.hide-grid #paperGrid { display: none; }
 
 /* 仕切り */
 #splitter {
