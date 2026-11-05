@@ -56,39 +56,81 @@
 
     <!-- ===== 下段：描画エリア ===== -->
     <section id="bottomPane" class="pane">
-      <div class="toolbar">
-        <button class="btn" id="undoBtn" title="元に戻す (Ctrl+Z)">↶</button>
-        <button class="btn" id="redoBtn" title="やり直し (Ctrl+Y)">↷</button>
-        <span class="sep"></span>
-        <div id="palette"></div>
-        <span class="sep"></span>
-        <div class="tool-group" id="toolGroup">
-          <button class="btn tool active" data-tool="pen" title="ペン (P)">
-            <svg viewBox="0 0 24 24"><path d="M4 20l4.2-1 10.3-10.3a2.1 2.1 0 0 0-3-3L5.2 16 4 20z"/><path d="M13.5 7.5l3 3"/></svg>
-          </button>
-          <button class="btn tool" data-tool="line" title="直線 (L)">
-            <svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>
-          </button>
-          <button class="btn tool" data-tool="rect" title="四角 (R)">
-            <svg viewBox="0 0 24 24"><rect x="5.5" y="5.5" width="13" height="13" rx="1.5"/></svg>
-          </button>
-          <button class="btn tool" data-tool="text" title="文字 (A) ／ タップした場所に文字を入力">
-            <svg viewBox="0 0 24 24"><path d="M6.5 19L12 5l5.5 14M8.6 14h6.8"/></svg>
-          </button>
-          <button class="btn tool" data-tool="hand" title="移動 (H) ／ 2本指・スペース+ドラッグでも移動、ダブルクリックで位置リセット">
-            <svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M12 3l-2.5 2.5M12 3l2.5 2.5M12 21l-2.5-2.5M12 21l2.5-2.5M3 12l2.5-2.5M3 12l2.5 2.5M21 12l-2.5-2.5M21 12l-2.5 2.5"/></svg>
-          </button>
+      <div class="draw-toolbar" id="drawToolbar">
+        <!-- 1段目：描画ツール5種 ＋ カラーパレット -->
+        <div class="draw-row">
+          <div class="tool-group" id="toolGroup">
+            <button class="dt-btn tool active" data-tool="pen" title="ペン (P)">
+              <svg class="fill-icon" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+            </button>
+            <button class="dt-btn tool" data-tool="line" title="直線 (L)">
+              <svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>
+            </button>
+            <button class="dt-btn tool" data-tool="rect" title="四角 (R)">
+              <svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1"/></svg>
+            </button>
+            <button class="dt-btn tool" data-tool="text" title="文字 (A) ／ タップした場所に文字を入力">
+              <svg class="fill-icon" viewBox="0 0 24 24"><path d="M10.9 4h2.2l5.4 14h2v2h-6.5v-2h1.8l-1.1-3H9.3l-1.1 3H10v2H3.5v-2h2L10.9 4zm-.9 9h4l-2-5.4L10 13z"/></svg>
+            </button>
+            <button class="dt-btn tool" data-tool="hand" title="移動 (H) ／ 2本指・スペース+ドラッグでも移動、ダブルクリックで位置リセット">
+              <svg class="fill-icon" viewBox="0 0 24 24"><path d="M12 2l4 4h-2.8v4.8H18V8l4 4-4 4v-2.8h-4.8V18H16l-4 4-4-4h2.8v-4.8H6V16l-4-4 4-4v2.8h4.8V6H8l4-4z"/></svg>
+            </button>
+          </div>
+          <div id="palette"></div>
         </div>
-        <span class="sep"></span>
-        <button class="btn" id="canvasZoomOutBtn" title="縮小（2本指ピンチ・ホイールでも可）">－</button>
-        <span id="canvasZoomLabel" title="クリックで100%・元の位置に戻す">100%</span>
-        <button class="btn" id="canvasZoomInBtn" title="拡大（2本指ピンチ・ホイールでも可）">＋</button>
-        <span class="sep"></span>
-        <button class="btn" id="clearBtn" title="全消去">🗑<span class="txt"> クリア</span></button>
-        <button class="btn primary" id="saveBtn" title="PNG保存 (Ctrl+S)">💾<span class="txt"> 保存</span></button>
-        <span class="sep"></span>
-        <button class="btn" id="overlayBtn" title="お手本を薄く重ねる (T)">👻<span class="txt"> 重ねる</span></button>
+
+        <!-- 2段目：左に拡大縮小、右に重ねる・透過率・保存・グリッド・元に戻す・全消去 -->
+        <div class="draw-row draw-row-sub">
+          <div class="zoom-group">
+            <button class="dt-btn zoom-btn" id="canvasZoomOutBtn" title="縮小（2本指ピンチ・ホイールでも可）">
+              <svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg>
+            </button>
+            <button class="dt-btn zoom-btn" id="canvasZoomInBtn" title="拡大（2本指ピンチ・ホイールでも可）">
+              <svg viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg>
+            </button>
+          </div>
+
+          <div class="action-group">
+            <button class="dt-btn act-overlay" id="overlayBtn" title="お手本を重ねる (T)">
+              <svg class="fill-icon" viewBox="0 0 24 24"><path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-1.5 14h-11l3.2-4.2 2.3 2.8 3.2-4.1L17.5 17zM8.5 10.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/></svg>
+              <span>重ねる</span>
+            </button>
+            <button class="dt-btn act-opacity" id="opacityBtn" title="重ね画像の透過率を変更" hidden>
+              <svg class="fill-icon" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18V4a8 8 0 0 1 0 16z"/></svg>
+              <span id="opacityLabel">透過 40%</span>
+            </button>
+            <button class="dt-btn act-save" id="saveBtn" title="PNG保存 (Ctrl+S)">
+              <svg class="fill-icon" viewBox="0 0 24 24"><path d="M12 15.5l-4.5-4.5h3V4h3v7h3L12 15.5zM5 18h14v2H5v-2z"/></svg>
+              <span>保存</span>
+            </button>
+            <button class="dt-btn act-icon act-grid active" id="paperGridBtn" title="方眼グリッド表示切替">
+              <svg viewBox="0 0 24 24"><rect x="4.5" y="4.5" width="15" height="15" rx="2"/><path d="M12 4.5v15M4.5 12h15"/></svg>
+            </button>
+            <button class="dt-btn act-icon act-undo" id="undoBtn" title="元に戻す (Ctrl+Z)">
+              <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+            </button>
+            <button class="dt-btn act-icon act-clear" id="clearBtn" title="全消去">
+              <svg class="fill-icon" viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v9h-2V9zm4 0h2v9h-2V9zM6 9h12l-1 11a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L6 9z"/></svg>
+            </button>
+          </div>
+        </div>
       </div>
+
+      <!-- 透過率調整ポップオーバー -->
+      <div id="opacityPopover" class="opacity-popover" hidden>
+        <div class="opacity-popover-row">
+          <span class="opacity-popover-title">透過率</span>
+          <input type="range" id="overlayAlphaRange" min="5" max="95" step="5" value="40" />
+          <span id="opacityPopoverVal">40%</span>
+        </div>
+        <div class="opacity-presets">
+          <button type="button" class="preset-chip" data-alpha="20">20%</button>
+          <button type="button" class="preset-chip active" data-alpha="40">40%</button>
+          <button type="button" class="preset-chip" data-alpha="60">60%</button>
+          <button type="button" class="preset-chip" data-alpha="80">80%</button>
+        </div>
+      </div>
+
       <div id="canvasWrap" class="stage">
         <img id="overlayImage" alt="" draggable="false" />
         <!-- スワイプで動かすレイヤー（方眼・描画キャンバスを一緒に移動） -->

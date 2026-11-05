@@ -80,7 +80,7 @@
   }
   // 表示が変わる時だけ文字を書き換える（移動中に毎回書き換えるとレイアウト計算が走りカクつくため）
   function setLabel(el, text) {
-    if (el.textContent !== text) el.textContent = text;
+    if (el && el.textContent !== text) el.textContent = text;
   }
 
   function fitImage() {
@@ -272,6 +272,7 @@
     alpha: 0.85, // えんぴつ風の質感は残しつつ、しっかり見やすい濃さに
     snap: false, // スナップ（PCのShiftキーと同じ：直線45度・正方形）
     magnet: true, // マグネット（方眼の線に吸い寄せる・常にオン）
+    showPaperGrid: true, // 下段の方眼グリッド表示
   };
   // --- マグネット設定（下段の薄い方眼に合わせる） ---
   const MAGNET_GRID = 10;      // 吸い寄せる線の間隔（ワールド座標10px）
@@ -285,9 +286,9 @@
     if (dist >= range) return v;
     return v + (line - v) * MAGNET_STRENGTH * (1 - dist / range);
   }
-  // ペン（フリーハンド）には効かせない。直線・四角だけに効く
+  // ペン（フリーハンド）には効かせない。直線・四角だけに効く（方眼オフ時は無効）
   const applyMagnet = (p, tool, z) =>
-    state.magnet && tool !== 'pen' ? { x: magnetAxis(p.x, z), y: magnetAxis(p.y, z) } : p;
+    state.magnet && state.showPaperGrid && tool !== 'pen' ? { x: magnetAxis(p.x, z), y: magnetAxis(p.y, z) } : p;
 
   let viewW = 0, viewH = 0;
   let drawing = null;
@@ -342,14 +343,14 @@
   function drawPaperGrid() {
     gctx.setTransform(1, 0, 0, 1, 0, 0);
     gctx.clearRect(0, 0, paperGrid.width, paperGrid.height);
-    if (!viewW || !viewH) return;
+    if (!state.showPaperGrid || !viewW || !viewH) return;
     const vz = renderedView.z, vx = renderedView.x, vy = renderedView.y;
     gctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     gctx.lineWidth = 1;
 
     const minor = 10 * vz;
     if (minor >= 4) {
-      gctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+      gctx.strokeStyle = 'rgba(255, 255, 255, 0.11)';
       gctx.beginPath();
       const i0 = Math.ceil((-vx) / minor), i1 = Math.floor((viewW - vx) / minor);
       for (let i = i0; i <= i1; i++) {
@@ -368,7 +369,7 @@
 
     const major = 50 * vz;
     if (major >= 4) {
-      gctx.strokeStyle = 'rgba(255, 255, 255, 0.10)';
+      gctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
       gctx.beginPath();
       const i0 = Math.ceil((-vx) / major), i1 = Math.floor((viewW - vx) / major);
       for (let i = i0; i <= i1; i++) {
@@ -483,7 +484,8 @@
   }
   function updateHistoryButtons() {
     $('undoBtn').disabled = histIndex <= 0;
-    $('redoBtn').disabled = histIndex >= undoStack.length;
+    const redoBtn = $('redoBtn');
+    if (redoBtn) redoBtn.disabled = histIndex >= undoStack.length;
   }
 
   // ワールド座標の範囲 → 表示領域内のデバイスピクセル矩形
@@ -1239,10 +1241,10 @@
   const canvasCenterZoom = (f) => zoomCanvasAt(f, wrap.clientWidth / 2, wrap.clientHeight / 2, true);
   $('canvasZoomInBtn').onclick = () => canvasCenterZoom(1.25);
   $('canvasZoomOutBtn').onclick = () => canvasCenterZoom(0.8);
-  canvasZoomLabel.onclick = resetPan;
+  if (canvasZoomLabel) canvasZoomLabel.onclick = resetPan;
 
   // 並び：赤、緑、青、紫、オレンジ、黄色、白、黒
-  const PALETTE = ['#e53935', '#43a047', '#1e88e5', '#8e24aa', '#fb8c00', '#fdd835', '#ffffff', '#222222'];
+  const PALETTE = ['#ff4d4f', '#2ecc71', '#3498db', '#9b59b6', '#e67e22', '#f1c40f', '#ffffff', '#1e1e1e'];
   const paletteEl = $('palette');
   function selectColor(c) {
     state.color = c;
@@ -1259,8 +1261,19 @@
   });
   selectColor(state.color);
 
+  // 下段の方眼グリッド表示切替
+  const paperGridBtn = $('paperGridBtn');
+  if (paperGridBtn) {
+    paperGridBtn.onclick = () => {
+      state.showPaperGrid = !state.showPaperGrid;
+      paperGridBtn.classList.toggle('active', state.showPaperGrid);
+      wrap.classList.toggle('hide-grid', !state.showPaperGrid);
+      drawPaperGrid();
+    };
+  }
+
   $('undoBtn').onclick = undo;
-  $('redoBtn').onclick = redo;
+  if ($('redoBtn')) $('redoBtn').onclick = redo;
   $('clearBtn').onclick = () => {
     commitText();
     if (!hasVisibleStrokes()) return;
@@ -1298,15 +1311,83 @@
   // スマホの長押しメニューを抑止
   [wrap, viewer].forEach((el) => el.addEventListener('contextmenu', (e) => e.preventDefault()));
 
-  // --- お手本の重ね表示（上と同じ画角で薄く表示。保存には含まれない） ---
+  // --- お手本の重ね表示＆透過率調整（上と同じ画角で薄く表示。保存には含まれない） ---
   const overlayBtn = $('overlayBtn');
-  function toggleOverlay(force) {
+  const opacityBtn = $('opacityBtn');
+  const opacityLabel = $('opacityLabel');
+  const opacityPopover = $('opacityPopover');
+  const overlayAlphaRange = $('overlayAlphaRange');
+  const opacityPopoverVal = $('opacityPopoverVal');
+  const presetChips = opacityPopover ? opacityPopover.querySelectorAll('.preset-chip') : [];
+  let overlayAlpha = 40; // 初期透過率 40%
+
+  function setOverlayAlpha(val) {
+    overlayAlpha = Math.min(95, Math.max(5, Math.round(Number(val) || 40)));
+    overlayImage.style.opacity = overlayAlpha / 100;
+    const labelText = `透過 ${overlayAlpha}%`;
+    if (opacityLabel) opacityLabel.textContent = labelText;
+    if (opacityPopoverVal) opacityPopoverVal.textContent = `${overlayAlpha}%`;
+    if (overlayAlphaRange) overlayAlphaRange.value = overlayAlpha;
+    presetChips.forEach((chip) => {
+      chip.classList.toggle('active', Number(chip.dataset.alpha) === overlayAlpha);
+    });
+  }
+
+  function closeOpacityPopover() {
+    if (opacityPopover) opacityPopover.hidden = true;
+  }
+
+  function openOpacityPopover() {
+    if (!opacityPopover || !opacityBtn || opacityBtn.hidden) return;
+    opacityPopover.hidden = false;
+    const r = opacityBtn.getBoundingClientRect();
+    const pw = opacityPopover.offsetWidth || 220;
+    const ph = opacityPopover.offsetHeight || 78;
+    const left = Math.max(8, Math.min(window.innerWidth - pw - 8, r.left + r.width / 2 - pw / 2));
+    const top = (r.bottom + 6 + ph <= window.innerHeight - 8)
+      ? r.bottom + 6
+      : Math.max(8, r.top - ph - 6);
+    opacityPopover.style.left = `${Math.round(left)}px`;
+    opacityPopover.style.top = `${Math.round(top)}px`;
+  }
+
+  function toggleOverlay(force, showSlider = false) {
     const on = document.body.classList.toggle('show-overlay', force);
     overlayBtn.classList.toggle('active', on);
-    if (on) syncOverlay(); // 重ねた時点の上段の画角に合わせる（以降は上段と連動しない）
+    if (opacityBtn) opacityBtn.hidden = !on;
+    if (on) {
+      syncOverlay(); // 重ねた時点の上段の画角に合わせる（以降は上段と連動しない）
+      if (showSlider) requestAnimationFrame(openOpacityPopover);
+    } else {
+      closeOpacityPopover();
+    }
   }
-  overlayBtn.onclick = () => toggleOverlay();
-  overlayImage.style.opacity = 0.3; // 重ね画像の透明度（固定）
+
+  overlayBtn.onclick = () => {
+    const turningOn = !document.body.classList.contains('show-overlay');
+    toggleOverlay(turningOn, turningOn);
+  };
+  if (opacityBtn) {
+    opacityBtn.onclick = () => {
+      if (opacityPopover && !opacityPopover.hidden) closeOpacityPopover();
+      else openOpacityPopover();
+    };
+  }
+  if (overlayAlphaRange) {
+    overlayAlphaRange.addEventListener('input', (e) => setOverlayAlpha(e.target.value));
+  }
+  presetChips.forEach((chip) => {
+    chip.onclick = () => setOverlayAlpha(chip.dataset.alpha);
+  });
+  document.addEventListener('pointerdown', (e) => {
+    if (!opacityPopover || opacityPopover.hidden) return;
+    if (opacityPopover.contains(e.target) ||
+        (opacityBtn && opacityBtn.contains(e.target)) ||
+        overlayBtn.contains(e.target)) return;
+    closeOpacityPopover();
+  }, true);
+  window.addEventListener('resize', closeOpacityPopover);
+  setOverlayAlpha(overlayAlpha);
 
   /* ---------------------------------------------------------
    * 3. グリッド・仕切り・ショートカット
