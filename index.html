@@ -20,32 +20,36 @@
     <!-- ===== 上段：お手本画像 ===== -->
     <section id="topPane" class="pane">
       <div class="toolbar">
-        <label class="btn pc-only" title="フォルダ内の画像をまとめて開く">
-          📁<span class="txt"> フォルダを開く</span>
-          <input type="file" id="folderInput" webkitdirectory directory multiple hidden />
-        </label>
-        <label class="btn" title="画像を選ぶ（複数選択・追加選択できます）">
-          🗂<span class="txt"> 画像を選ぶ</span>
-          <input type="file" id="fileInput" accept="image/*" multiple hidden />
-        </label>
-        <button class="btn" id="prevBtn" title="前の画像 (←)">◀</button>
-        <select id="imageSelect" title="画像一覧"><option>画像未選択</option></select>
-        <button class="btn" id="nextBtn" title="次の画像 (→)">▶</button>
-        <span class="sep"></span>
-        <button class="btn" id="zoomOutBtn" title="縮小">－</button>
-        <span id="zoomLabel">100%</span>
-        <button class="btn" id="zoomInBtn" title="拡大">＋</button>
-        <button class="btn" id="fitBtn" title="全体表示">⤢<span class="txt"> 全体</span></button>
-        <span class="sep"></span>
-        <label class="chk"><input type="checkbox" id="gridToggle" checked /> グリッド</label>
-        <input type="range" id="gridSize" min="20" max="200" value="50" title="グリッド間隔" />
+        <div class="tb-group">
+          <label class="btn" title="フォルダ内の画像をまとめて開く">
+            📁<span class="txt"> フォルダを開く</span>
+            <input type="file" id="folderInput" webkitdirectory directory multiple hidden />
+          </label>
+          <label class="btn" title="画像を選ぶ（複数選択・追加選択できます）">
+            🗂<span class="txt"> 画像を選ぶ</span>
+            <input type="file" id="fileInput" accept="image/*" multiple hidden />
+          </label>
+          <button class="btn" id="prevBtn" title="前の画像 (←)">◀</button>
+          <select id="imageSelect" title="画像一覧"><option>画像未選択</option></select>
+          <button class="btn" id="nextBtn" title="次の画像 (→)">▶</button>
+        </div>
+        <span class="sep pc-sep"></span>
+        <div class="tb-group">
+          <button class="btn" id="zoomOutBtn" title="縮小">－</button>
+          <span id="zoomLabel">100%</span>
+          <button class="btn" id="zoomInBtn" title="拡大">＋</button>
+          <button class="btn" id="fitBtn" title="全体表示">⤢<span class="txt"> 全体</span></button>
+          <span class="sep"></span>
+          <label class="chk"><input type="checkbox" id="gridToggle" checked /> グリッド</label>
+          <input type="range" id="gridSize" min="20" max="200" value="50" title="グリッド間隔" />
+        </div>
       </div>
       <div id="viewer" class="stage">
         <img id="refImage" alt="" draggable="false" />
         <div class="grid-overlay"></div>
         <div id="dropHint" class="hint">
           <span class="pc-only">ここに画像をドラッグ＆ドロップ<br />または「📁 フォルダを開く」から選択</span>
-          <span class="mobile-only">「🗂」ボタンから画像を選択<br />（複数選択できます）<br />1本指で移動・2本指で拡大縮小</span>
+          <span class="mobile-only">「📁」または「🗂」から画像を選択<br />（複数選択できます）<br />1本指で移動・2本指で拡大縮小</span>
         </div>
       </div>
     </section>

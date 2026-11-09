@@ -23,12 +23,15 @@ html, body {
   padding: 6px 10px; background: #2a2d36; border-bottom: 1px solid #3a3e4a;
   font-size: 13px; user-select: none;
 }
-.sep { width: 1px; height: 22px; background: #454a58; margin: 0 4px; }
+.tb-group {
+  display: flex; align-items: center; gap: 6px;
+}
+.sep { width: 1px; height: 22px; background: #454a58; margin: 0 4px; flex-shrink: 0; }
 
 .btn {
-  display: inline-flex; align-items: center; gap: 4px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
   padding: 5px 10px; border: 1px solid #4a4f5e; border-radius: 6px;
-  background: #353946; color: #e8e8ec; cursor: pointer; font-size: 13px;
+  background: #353946; color: #e8e8ec; cursor: pointer; font-size: 13px; line-height: 1;
   transition: background .15s, border-color .15s;
 }
 @media (hover: hover) { .btn:hover { background: #424757; } }
@@ -254,26 +257,55 @@ body.show-grid #viewer .grid-overlay { display: block; }
 body.mobile .pc-only { display: none !important; }
 body.mobile .mobile-only { display: inline; }
 
-/* 上段ツールバーのタッチ対応 */
+/* 上段ツールバーのタッチ・スマホ対応（2段構成で全アイコンが画面内に収まるようにする） */
 body.mobile .toolbar {
-  flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden;
-  -webkit-overflow-scrolling: touch; scrollbar-width: none;
-  padding: 6px 8px; gap: 6px;
+  flex-direction: column; align-items: stretch;
+  padding: 5px 7px; gap: 5px;
 }
-body.mobile .toolbar::-webkit-scrollbar { display: none; }
-body.mobile .toolbar > * { flex-shrink: 0; }
-body.mobile .toolbar .btn { min-width: 40px; min-height: 40px; justify-content: center; font-size: 16px; padding: 4px 8px; }
+body.mobile .toolbar .pc-sep { display: none; }
+body.mobile .tb-group {
+  display: flex; align-items: center; gap: 5px; width: 100%;
+}
+body.mobile .toolbar .btn {
+  min-width: 34px; height: 32px; padding: 0 7px;
+  justify-content: center; font-size: 14px; flex-shrink: 0;
+}
 body.mobile #zoomLabel {
-  min-width: 52px; min-height: 40px; padding: 0 4px;
-  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 44px; height: 32px; padding: 0 2px; font-size: 12px;
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
 }
-body.mobile select { min-height: 40px; max-width: 140px; font-size: 14px; }
-body.mobile .toolbar input[type="range"] { width: 100px; height: 28px; }
+body.mobile select {
+  flex: 1; min-width: 0; max-width: none; height: 32px; font-size: 13px; padding: 0 6px;
+}
+body.mobile .toolbar .chk { font-size: 12px; white-space: nowrap; flex-shrink: 0; }
+body.mobile .toolbar input[type="range"] { flex: 1; min-width: 50px; max-width: 120px; height: 24px; margin: 0; }
 body.mobile #splitter { flex-basis: 18px; }
 body.mobile #splitter::after { top: 6px; width: 60px; margin-left: -30px; height: 6px; border-radius: 3px; }
 
-/* 狭いスマホ画面でも下段2行ツールバーがそのまま収まるように微調整 */
+/* 狭いスマホ画面でも上下ツールバーがそのまま画面内に収まるように微調整 */
 @media (max-width: 560px) {
+  .toolbar {
+    flex-direction: column; align-items: stretch;
+    padding: 5px 7px; gap: 5px;
+  }
+  .toolbar .pc-sep { display: none; }
+  .tb-group {
+    display: flex; align-items: center; gap: 5px; width: 100%;
+  }
+  .toolbar .btn {
+    min-width: 34px; height: 32px; padding: 0 7px;
+    justify-content: center; font-size: 14px; flex-shrink: 0;
+  }
+  #zoomLabel {
+    min-width: 44px; height: 32px; padding: 0 2px; font-size: 12px;
+    display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  select {
+    flex: 1; min-width: 0; max-width: none; height: 32px; font-size: 13px; padding: 0 6px;
+  }
+  .toolbar .chk { font-size: 12px; white-space: nowrap; flex-shrink: 0; }
+  .toolbar input[type="range"] { flex: 1; min-width: 50px; max-width: 120px; height: 24px; margin: 0; }
+
   .draw-toolbar { padding: 5px 7px; gap: 5px; }
   .draw-row { gap: 7px; }
   .tool-group { gap: 4px; }
