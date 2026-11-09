@@ -111,6 +111,9 @@
   $('zoomInBtn').onclick = () => zoomCenter(1.25);
   $('zoomOutBtn').onclick = () => zoomCenter(0.8);
   $('fitBtn').onclick = fitImage;
+  // 下段ツールバーの「フォルダ」「画像」ボタン（上段と同じ入力欄を開く。画像は複数選択可）
+  $('drawFolderBtn').onclick = () => $('folderInput').click();
+  $('drawImageBtn').onclick = () => $('fileInput').click();
 
   // ホイールでズーム
   // タッチパッドは細かいイベントが大量に来るため、スクロール量(deltaY)に比例させて拡大率を決める
@@ -306,7 +309,8 @@
     pan.z = clampZoom(pan.z);
     const vw = viewW || wrap.clientWidth || 1;
     const vh = viewH || wrap.clientHeight || 1;
-    let wMinX = -vw, wMaxX = vw * 2, wMinY = -vh, wMaxY = vh * 2;
+    // 描画可能範囲：面積で従来(3×3画面=9倍)の4倍(6×6画面=36倍)。画面を中心に拡張
+    let wMinX = -vw * 2.5, wMaxX = vw * 3.5, wMinY = -vh * 2.5, wMaxY = vh * 3.5;
     if (refImage.naturalWidth) {
       const ix0 = overlayView.x, iy0 = overlayView.y;
       const ix1 = ix0 + refImage.naturalWidth * overlayView.scale;
@@ -661,6 +665,18 @@
     }
   }
 
+  // 楕円（丸）の縁を鉛筆スタンプでなぞる（細かい線分に分割して連続描画）
+  function stampEllipse(c, dabs, dabScale, step, jitterScale, cx, cy, rx, ry, st, clip) {
+    const n = Math.min(720, Math.max(36, Math.ceil(Math.PI * (rx + ry) / 3)));
+    let px = cx + rx, py = cy;
+    for (let i = 1; i <= n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      const nx = cx + Math.cos(a) * rx, ny = cy + Math.sin(a) * ry;
+      stampSegmentScaled(c, dabs, dabScale, step, jitterScale, px, py, nx, ny, st, clip);
+      px = nx; py = ny;
+    }
+  }
+
   function computeShapeEndpoints(tool, a, b, shift) {
     let { x: x1, y: y1 } = a, { x: x2, y: y2 } = b;
     if (shift) {
@@ -689,6 +705,36 @@
     if (s.bounds.maxX + pad < wLeft || s.bounds.minX - pad > wRight ||
         s.bounds.maxY + pad < wTop || s.bounds.minY - pad > wBottom) return;
 
+    if (s.tool === 'fill') {
+      // 図形(四角・丸)の内側を塗りつぶし（枠線の内側ぶん縮めて枠線は残す）
+      const sx1 = vx + s.x1 * vz, sy1 = vy + s.y1 * vz;
+      const sx2 = vx + s.x2 * vz, sy2 = vy + s.y2 * vz;
+      ctx.save();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = s.alpha;
+      ctx.fillStyle = getTextPattern(s.color, 1);
+      ctx.beginPath();
+      if (s.kind === 'circle') {
+        ctx.ellipse((sx1 + sx2) / 2, (sy1 + sy2) / 2, Math.abs(sx2 - sx1) / 2, Math.abs(sy2 - sy1) / 2, 0, 0, Math.PI * 2);
+      } else {
+        ctx.rect(Math.min(sx1, sx2), Math.min(sy1, sy2), Math.abs(sx2 - sx1), Math.abs(sy2 - sy1));
+      }
+      ctx.fill();
+      ctx.restore();
+      return;
+    }
+    if (s.tool === 'floodfill') {
+      // 領域塗り：作成時に得たビットマップをワールド座標に貼り付け（拡大縮小・移動に追従）
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = s.alpha;
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(s.bmp, (vx + s.wx * vz) * dpr, (vy + s.wy * vz) * dpr, s.ww * vz * dpr, s.wh * vz * dpr);
+      ctx.restore();
+      return;
+    }
     if (s.tool === 'text') {
       const scaleFactor = vz / s.baseZ;
       const fs = s.worldFontSize * vz;
@@ -751,7 +797,12 @@
         } else if (s.tool === 'line') {
           ctx.moveTo(sx1, sy1); ctx.lineTo(sx2, sy2); ctx.stroke();
         } else {
-          ctx.strokeRect(Math.min(sx1, sx2), Math.min(sy1, sy2), Math.abs(sx2 - sx1), Math.abs(sy2 - sy1));
+          if (s.tool === 'circle') {
+            ctx.ellipse((sx1 + sx2) / 2, (sy1 + sy2) / 2, Math.abs(sx2 - sx1) / 2, Math.abs(sy2 - sy1) / 2, 0, 0, Math.PI * 2);
+            ctx.stroke();
+          } else {
+            ctx.strokeRect(Math.min(sx1, sx2), Math.min(sy1, sy2), Math.abs(sx2 - sx1), Math.abs(sy2 - sy1));
+          }
         }
       }
       ctx.restore();
@@ -810,6 +861,9 @@
         }
       } else if (s.tool === 'line') {
         stampSegmentScaled(pctx, dabs, dabScale, step, scaleFactor, sx1, sy1, sx2, sy2, st, clip);
+      } else if (s.tool === 'circle') {
+        stampEllipse(pctx, dabs, dabScale, step, scaleFactor, (sx1 + sx2) / 2, (sy1 + sy2) / 2,
+          Math.abs(sx2 - sx1) / 2, Math.abs(sy2 - sy1) / 2, st, clip);
       } else if (s.tool === 'rect') {
         const rx0 = Math.min(sx1, sx2), ry0 = Math.min(sy1, sy2);
         const rx1 = Math.max(sx1, sx2), ry1 = Math.max(sy1, sy2);
@@ -905,6 +959,9 @@
       for (let k = 0; k < 3; k++) stampDotScaled(pctx, dabs, 1, 1, sx1, sy1, st.idx++);
     } else if (d.tool === 'line') {
       stampSegmentScaled(pctx, dabs, 1, step, 1, sx1, sy1, sx2, sy2, st, null);
+    } else if (d.tool === 'circle') {
+      stampEllipse(pctx, dabs, 1, step, 1, (sx1 + sx2) / 2, (sy1 + sy2) / 2,
+        Math.abs(sx2 - sx1) / 2, Math.abs(sy2 - sy1) / 2, st, null);
     } else if (d.tool === 'rect') {
       const rx0 = Math.min(sx1, sx2), ry0 = Math.min(sy1, sy2);
       const rx1 = Math.max(sx1, sx2), ry1 = Math.max(sy1, sy2);
@@ -1055,6 +1112,109 @@
     pushHistory(entry);
   }
 
+  // --- 塗りつぶしツール：四角・丸をタップ→その図形を塗る／なければ囲まれた空白を領域塗り ---
+  function shapeContains(s, p) {
+    const x0 = Math.min(s.x1, s.x2), x1 = Math.max(s.x1, s.x2);
+    const y0 = Math.min(s.y1, s.y2), y1 = Math.max(s.y1, s.y2);
+    if (s.tool === 'rect') return p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1;
+    const rx = (x1 - x0) / 2, ry = (y1 - y0) / 2;
+    if (rx <= 0 || ry <= 0) return false;
+    const dx = (p.x - (x0 + x1) / 2) / rx, dy = (p.y - (y0 + y1) / 2) / ry;
+    return dx * dx + dy * dy <= 1;
+  }
+  function fillAt(p) {
+    commitText();
+    syncRenderedView();
+    let start = 0;
+    for (let i = histIndex - 1; i >= 0; i--) {
+      if (undoStack[i].tool === 'clear') { start = i + 1; break; }
+    }
+    for (let i = histIndex - 1; i >= start; i--) {
+      const s = undoStack[i];
+      if ((s.tool !== 'rect' && s.tool !== 'circle') || !shapeContains(s, p)) continue;
+      const h = s.worldSize / 2; // 枠線の内側から塗る
+      const x0 = Math.min(s.x1, s.x2) + h, x1 = Math.max(s.x1, s.x2) - h;
+      const y0 = Math.min(s.y1, s.y2) + h, y1 = Math.max(s.y1, s.y2) - h;
+      if (x1 <= x0 || y1 <= y0) return;
+      const entry = {
+        tool: 'fill', kind: s.tool, x1: x0, y1: y0, x2: x1, y2: y1,
+        color: state.color, alpha: state.alpha, worldSize: 0,
+        bounds: { minX: x0, minY: y0, maxX: x1, maxY: y1 },
+      };
+      renderStrokeToViewport(entry);
+      pushHistory(entry);
+      return;
+    }
+    floodFillAt(p);
+  }
+  function floodFillAt(p) {
+    const vx = renderedView.x, vy = renderedView.y, vz = renderedView.z;
+    const W = canvas.width, H = canvas.height;
+    const sx = Math.floor((vx + p.x * vz) * dpr), sy = Math.floor((vy + p.y * vz) * dpr);
+    if (sx < 0 || sy < 0 || sx >= W || sy >= H) return;
+    const d = ctx.getImageData(0, 0, W, H).data;
+    const si = (sy * W + sx) * 4;
+    const r0 = d[si], g0 = d[si + 1], b0 = d[si + 2], a0 = d[si + 3];
+    const blank = a0 < 24;
+    const same = (i) => blank
+      ? d[i + 3] < 48
+      : Math.abs(d[i] - r0) + Math.abs(d[i + 1] - g0) + Math.abs(d[i + 2] - b0) + Math.abs(d[i + 3] - a0) <= 64;
+    const mask = new Uint8Array(W * H);
+    const stack = [sx, sy];
+    let minX = sx, maxX = sx, minY = sy, maxY = sy;
+    while (stack.length) {
+      const y = stack.pop(), x0 = stack.pop();
+      let x = x0;
+      while (x >= 0 && !mask[y * W + x] && same((y * W + x) * 4)) x--;
+      x++;
+      let up = false, down = false;
+      for (; x < W && !mask[y * W + x] && same((y * W + x) * 4); x++) {
+        mask[y * W + x] = 1;
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+        if (y > 0) {
+          const ok = !mask[(y - 1) * W + x] && same(((y - 1) * W + x) * 4);
+          if (ok && !up) { stack.push(x, y - 1); up = true; } else if (!ok) up = false;
+        }
+        if (y < H - 1) {
+          const ok = !mask[(y + 1) * W + x] && same(((y + 1) * W + x) * 4);
+          if (ok && !down) { stack.push(x, y + 1); down = true; } else if (!ok) down = false;
+        }
+      }
+    }
+    // 1px広げて、線のフチのすき間（アンチエイリアス部分）まで塗る
+    const bx0 = Math.max(0, minX - 1), by0 = Math.max(0, minY - 1);
+    const bx1 = Math.min(W - 1, maxX + 1), by1 = Math.min(H - 1, maxY + 1);
+    const bw = bx1 - bx0 + 1, bh = by1 - by0 + 1;
+    const [cr, cg, cb] = pencilRgb(state.color);
+    const out = new ImageData(bw, bh);
+    const od = out.data;
+    for (let y = by0; y <= by1; y++) {
+      for (let x = bx0; x <= bx1; x++) {
+        let on = mask[y * W + x];
+        if (!on) {
+          on = (x > 0 && mask[y * W + x - 1]) || (x < W - 1 && mask[y * W + x + 1]) ||
+               (y > 0 && mask[(y - 1) * W + x]) || (y < H - 1 && mask[(y + 1) * W + x]);
+        }
+        if (on) {
+          const o = ((y - by0) * bw + (x - bx0)) * 4;
+          od[o] = cr; od[o + 1] = cg; od[o + 2] = cb; od[o + 3] = 255;
+        }
+      }
+    }
+    const bmp = document.createElement('canvas');
+    bmp.width = bw; bmp.height = bh;
+    bmp.getContext('2d').putImageData(out, 0, 0);
+    const wx = (bx0 / dpr - vx) / vz, wy = (by0 / dpr - vy) / vz;
+    const ww = bw / dpr / vz, wh = bh / dpr / vz;
+    const entry = {
+      tool: 'floodfill', bmp, wx, wy, ww, wh, color: state.color, alpha: state.alpha, worldSize: 0,
+      bounds: { minX: wx, minY: wy, maxX: wx + ww, maxY: wy + wh },
+    };
+    renderStrokeToViewport(entry);
+    pushHistory(entry);
+  }
+
   const captureWrap = (id) => { try { wrap.setPointerCapture(id); } catch (_) {} };
 
   wrap.addEventListener('pointerdown', (e) => {
@@ -1068,7 +1228,7 @@
     if (panGesture || twoFinger || state.tool === 'hand' || spaceDown || mousePan) {
       e.preventDefault();
       captureWrap(e.pointerId);
-      canvasPanSpeed = isMouse ? MOUSE_PAN_SPEED : PAN_SPEED;
+      canvasPanSpeed = 1.0; // 指・マウスとも1:1で追従（0.5倍だと鈍く感じるため）
       if (twoFinger) {
         panPointers.set(firstTouch.id, firstTouch.client);
         if (pendingTap) pendingTap = null;
@@ -1094,7 +1254,7 @@
     const p = getWorldPos(e, rect);
     const tool = state.tool;
 
-    if (tool === 'text') {
+    if (tool === 'text' || tool === 'fill') {
       captureWrap(e.pointerId);
       pendingTap = { id: e.pointerId, p, tool, client: { x: e.clientX, y: e.clientY }, start: { x: e.clientX, y: e.clientY } };
       return;
@@ -1159,7 +1319,8 @@
       pendingTap = null;
       const moved = Math.hypot(f.client.x - f.start.x, f.client.y - f.start.y);
       if (e.type === 'pointerup' && moved < 10) {
-        openText(f.p);
+        if (f.tool === 'fill') fillAt(f.p);
+        else openText(f.p);
       }
       return;
     }
@@ -1214,7 +1375,7 @@
   const toolButtons = document.querySelectorAll('#toolGroup .tool');
   function updateCursor() {
     if (panGesture) return;
-    wrap.style.cursor = state.tool === 'hand' || spaceDown ? 'grab' : state.tool === 'text' ? 'text' : 'crosshair';
+    wrap.style.cursor = state.tool === 'hand' || spaceDown ? 'grab' : state.tool === 'text' ? 'text' : state.tool === 'fill' ? 'pointer' : 'crosshair';
   }
   function setTool(t) {
     commitText();
@@ -1245,6 +1406,10 @@
     zoomCanvasAt(Math.exp(-dy * speed), e.clientX - r.left, e.clientY - r.top, false);
   }, { passive: false });
   if (canvasZoomLabel) canvasZoomLabel.onclick = resetPan;
+  // 下段の拡大・縮小ボタン（－ / ＋）：表示領域の中心を基準にズーム
+  const zoomCanvasCenter = (f) => zoomCanvasAt(f, (viewW || wrap.clientWidth) / 2, (viewH || wrap.clientHeight) / 2, true);
+  $('canvasZoomOutBtn').onclick = () => { commitText(); zoomCanvasCenter(0.8); };
+  $('canvasZoomInBtn').onclick = () => { commitText(); zoomCanvasCenter(1.25); };
 
   // --- 線の太さ調整（－ / ＋ ボタン） ---
   const STROKE_SIZES = [1, 2, 4, 6, 8, 10, 12, 16, 20, 24, 30];
@@ -1367,7 +1532,7 @@
   function toggleOverlay(force) {
     const on = document.body.classList.toggle('show-overlay', force);
     overlayBtn.classList.toggle('active', on);
-    if (opacityBtn) opacityBtn.hidden = !on;
+    if (opacityBtn) opacityBtn.disabled = !on;
     if (on) syncOverlay(); // 重ねた時点の上段の画角に合わせる（以降は上段と連動しない）
   }
 
@@ -1427,7 +1592,7 @@
       else if (k === 's') { e.preventDefault(); save(); }
       return;
     }
-    const map = { p: 'pen', l: 'line', r: 'rect', a: 'text', h: 'hand' };
+    const map = { p: 'pen', l: 'line', r: 'rect', c: 'circle', f: 'fill', a: 'text', h: 'hand' };
     if (e.key === ' ') {
       // スペースを押している間はドラッグで下段を移動
       e.preventDefault();

@@ -94,7 +94,8 @@ html, body {
 @media (hover: hover) { .swatch:hover { transform: scale(1.1); } }
 
 /* 2段目左：－ / ＋ 線の太さ調整ボタン */
-.size-group { position: relative; display: flex; align-items: center; gap: 5px; }
+.size-group, .zoom-group { position: relative; display: flex; align-items: center; gap: 5px; }
+.draw-row-sub { justify-content: flex-start; gap: 22px; }
 .dt-btn.size-btn {
   width: 28px; height: 28px; border-radius: 6px;
   background: #313036; border-color: #47464e; color: #f5f5fa;
@@ -102,13 +103,10 @@ html, body {
 .dt-btn.size-btn svg { width: 14px; height: 14px; stroke-width: 2.5; }
 @media (hover: hover) { .dt-btn.size-btn:not(:disabled):hover { background: #3d3c44; } }
 .size-indicator {
-  position: absolute; left: calc(100% + 7px); top: 50%; transform: translateY(-50%);
-  display: inline-flex; align-items: center; gap: 5px;
-  height: 24px; padding: 0 7px; border-radius: 12px;
-  background: rgba(42, 41, 50, .92); border: 1px solid #484752;
-  color: #dcdce4; font-size: 11px; font-weight: 600;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  min-width: 48px; height: 28px; padding: 0 4px;
+  color: #dcdce4; font-size: 13px; font-weight: 500;
   font-variant-numeric: tabular-nums; white-space: nowrap;
-  opacity: 0; pointer-events: none; transition: opacity .2s;
 }
 .size-indicator.visible { opacity: 1; }
 .size-dot {
@@ -117,8 +115,13 @@ html, body {
 }
 
 /* 2段目右：アクションボタン群 */
-.action-group { display: flex; align-items: center; gap: 7px; margin-left: auto; }
-.action-group .dt-btn { height: 34px; border-radius: 7px; padding: 0 11px; }
+.action-group { display: flex; align-items: center; gap: 7px; }
+.action-group .dt-btn { height: 38px; border-radius: 8px; padding: 0 14px; }
+.action-group .dt-btn:disabled { opacity: .45; }
+
+/* フォルダ・画像ボタン（グリーン枠） */
+.dt-btn.act-open { background: #1f3e30; border-color: #57b286; color: #72d5a3; }
+@media (hover: hover) { .dt-btn.act-open:hover { background: #264d3b; } }
 .action-group .dt-btn svg { width: 16px; height: 16px; }
 .action-group .dt-btn.act-icon { min-width: 54px; padding: 0 12px; }
 
@@ -284,7 +287,14 @@ body.mobile #splitter::after { top: 6px; width: 60px; margin-left: -30px; height
   #palette { gap: 5px; padding: 2px; }
   .swatch { width: 21px; height: 21px; }
   .swatch.selected { box-shadow: 0 0 0 1.5px #1a191f, 0 0 0 3px #ffffff; }
-  .dt-btn.size-btn { width: 26px; height: 26px; }
+  .dt-btn.size-btn { width: 32px; height: 32px; }
+  /* スマホでは各段を折り返して全ボタンが画面内に収まるようにする */
+  .draw-row { flex-wrap: wrap; row-gap: 6px; overflow-x: visible; }
+  .draw-row-sub { gap: 14px; }
+  .size-indicator { min-width: 40px; font-size: 12px; }
+  .action-group { flex-wrap: wrap; row-gap: 5px; }
+  .action-group .dt-btn { height: 36px; }
+  .action-group .dt-btn.act-icon { min-width: 40px; }
   .action-group { gap: 4px; }
   .action-group .dt-btn { height: 30px; padding: 0 7px; font-size: 11.5px; gap: 3px; }
   .action-group .dt-btn svg { width: 14px; height: 14px; }

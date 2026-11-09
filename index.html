@@ -69,6 +69,12 @@
             <button class="dt-btn tool" data-tool="rect" title="四角 (R)">
               <svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1"/></svg>
             </button>
+            <button class="dt-btn tool" data-tool="circle" title="丸 (C)">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5"/></svg>
+            </button>
+            <button class="dt-btn tool" data-tool="fill" title="塗りつぶし (F) ／ 四角・丸をタップでその色に、なければ囲まれた空白を塗る">
+              <svg class="fill-icon" viewBox="0 0 24 24"><path d="M16.56 8.94L7.62 0 6.21 1.41l2.38 2.38-5.15 5.15c-.59.59-.59 1.54 0 2.12l5.5 5.5c.29.29.68.44 1.06.44s.77-.15 1.06-.44l5.5-5.5c.59-.58.59-1.53 0-2.12zM5.21 10L10 5.21 14.79 10H5.21zM19 11.5s-2 2.17-2 3.5c0 1.1.9 2 2 2s2-.9 2-2c0-1.33-2-3.5-2-3.5z"/></svg>
+            </button>
             <button class="dt-btn tool" data-tool="text" title="文字 (A) ／ タップした場所に文字を入力">
               <svg class="fill-icon" viewBox="0 0 24 24"><path d="M10.9 4h2.2l5.4 14h2v2h-6.5v-2h1.8l-1.1-3H9.3l-1.1 3H10v2H3.5v-2h2L10.9 4zm-.9 9h4l-2-5.4L10 13z"/></svg>
             </button>
@@ -79,27 +85,21 @@
           <div id="palette"></div>
         </div>
 
-        <!-- 2段目：左に線の太さ調整（－／＋）、右に重ねる・透過率・保存・グリッド・元に戻す・全消去 -->
-        <div class="draw-row draw-row-sub">
-          <div class="size-group">
-            <button class="dt-btn size-btn" id="sizeDownBtn" title="線を細くする">
-              <svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg>
-            </button>
-            <button class="dt-btn size-btn" id="sizeUpBtn" title="線を太くする">
-              <svg viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg>
-            </button>
-            <span id="sizeIndicator" class="size-indicator" aria-live="polite">
-              <span id="sizeDot" class="size-dot"></span>
-              <span id="sizeVal">8</span>
-            </span>
-          </div>
-
+        <!-- 2段目：フォルダ・画像・重ねる・透過・保存・グリッド・元に戻す・全消去 -->
+        <div class="draw-row">
           <div class="action-group">
-            <button class="dt-btn act-overlay" id="overlayBtn" title="お手本を重ねる (T)">
+            <button class="dt-btn act-open pc-only" id="drawFolderBtn" title="フォルダを選ぶ（フォルダ内の画像をまとめて読み込み）">
+              <svg class="fill-icon" viewBox="0 0 24 24"><path d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z"/></svg>
+            </button>
+            <button class="dt-btn act-open" id="drawImageBtn" title="画像を選ぶ（複数選択できます）">
               <svg class="fill-icon" viewBox="0 0 24 24"><path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-1.5 14h-11l3.2-4.2 2.3 2.8 3.2-4.1L17.5 17zM8.5 10.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/></svg>
+              <span>画像</span>
+            </button>
+            <button class="dt-btn act-overlay" id="overlayBtn" title="お手本を重ねる (T)">
+              <svg viewBox="0 0 24 24"><rect x="3" y="3" width="12" height="12" rx="2"/><rect x="9" y="9" width="12" height="12" rx="2"/></svg>
               <span>重ねる</span>
             </button>
-            <button class="dt-btn act-opacity" id="opacityBtn" title="押すたびに10%ずつ透過率を変更" hidden>
+            <button class="dt-btn act-opacity" id="opacityBtn" title="押すたびに10%ずつ透過率を変更" disabled>
               <svg class="fill-icon" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18V4a8 8 0 0 1 0 16z"/></svg>
               <span id="opacityLabel">透過 40%</span>
             </button>
@@ -115,6 +115,30 @@
             </button>
             <button class="dt-btn act-icon act-clear" id="clearBtn" title="全消去">
               <svg class="fill-icon" viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v9h-2V9zm4 0h2v9h-2V9zM6 9h12l-1 11a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L6 9z"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- 3段目：左に描画エリアの拡大縮小（－／％／＋）、右に線の太さ（－／px／＋） -->
+        <div class="draw-row draw-row-sub">
+          <div class="zoom-group">
+            <button class="dt-btn size-btn" id="canvasZoomOutBtn" title="縮小">
+              <svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg>
+            </button>
+            <span id="canvasZoomLabel" class="size-indicator" title="タップで100%に戻す">100%</span>
+            <button class="dt-btn size-btn" id="canvasZoomInBtn" title="拡大">
+              <svg viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg>
+            </button>
+          </div>
+          <div class="size-group">
+            <button class="dt-btn size-btn" id="sizeDownBtn" title="線を細くする">
+              <svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg>
+            </button>
+            <span id="sizeIndicator" class="size-indicator" aria-live="polite">
+              <span id="sizeVal">8px</span>
+            </span>
+            <button class="dt-btn size-btn" id="sizeUpBtn" title="線を太くする">
+              <svg viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg>
             </button>
           </div>
         </div>
