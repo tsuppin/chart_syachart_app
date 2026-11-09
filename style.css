@@ -23,7 +23,6 @@ html, body {
   padding: 6px 10px; background: #2a2d36; border-bottom: 1px solid #3a3e4a;
   font-size: 13px; user-select: none;
 }
-.title { font-weight: 700; margin-right: 6px; }
 .sep { width: 1px; height: 22px; background: #454a58; margin: 0 4px; }
 
 .btn {
@@ -118,10 +117,6 @@ html, body {
 .action-group { display: flex; align-items: center; gap: 7px; }
 .action-group .dt-btn { height: 38px; border-radius: 8px; padding: 0 14px; }
 .action-group .dt-btn:disabled { opacity: .45; }
-
-/* フォルダ・画像ボタン（グリーン枠） */
-.dt-btn.act-open { background: #1f3e30; border-color: #57b286; color: #72d5a3; }
-@media (hover: hover) { .dt-btn.act-open:hover { background: #264d3b; } }
 .action-group .dt-btn svg { width: 16px; height: 16px; }
 .action-group .dt-btn.act-icon { min-width: 54px; padding: 0 12px; }
 
@@ -304,5 +299,4 @@ body.mobile #splitter::after { top: 6px; width: 60px; margin-left: -30px; height
 /* 狭い画面では上段ボタンの文字を隠してアイコンだけに */
 @media (max-width: 820px) {
   .txt { display: none; }
-  .title { margin-right: 0; }
 }

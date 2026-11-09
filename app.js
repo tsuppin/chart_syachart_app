@@ -26,14 +26,32 @@
   const isImage = (f) => f.type.startsWith('image/') ||
     /\.(png|jpe?g|gif|bmp|webp|svg|avif)$/i.test(f.name);
 
-  function loadFiles(fileList) {
+  function loadFiles(fileList, append = false) {
     const files = Array.from(fileList).filter(isImage);
     if (!files.length) { alert('画像ファイルが見つかりませんでした。'); return; }
     files.sort((a, b) =>
       (a.webkitRelativePath || a.name).localeCompare(b.webkitRelativePath || b.name, 'ja', { numeric: true }));
 
-    images.forEach((im) => URL.revokeObjectURL(im.url));
-    images = files.map((f) => ({ name: f.webkitRelativePath || f.name, url: URL.createObjectURL(f) }));
+    let targetIndex = 0;
+    if (append && images.length) {
+      targetIndex = images.length;
+      files.forEach((f) => {
+        const name = f.webkitRelativePath || f.name;
+        const url = URL.createObjectURL(f);
+        const existIdx = images.findIndex((im) => im.name === name);
+        if (existIdx !== -1) {
+          URL.revokeObjectURL(images[existIdx].url);
+          images[existIdx].url = url;
+          if (files.length === 1) targetIndex = existIdx;
+        } else {
+          images.push({ name, url });
+        }
+      });
+      if (targetIndex >= images.length) targetIndex = images.length - 1;
+    } else {
+      images.forEach((im) => URL.revokeObjectURL(im.url));
+      images = files.map((f) => ({ name: f.webkitRelativePath || f.name, url: URL.createObjectURL(f) }));
+    }
 
     imageSelect.innerHTML = '';
     images.forEach((im, i) => {
@@ -42,7 +60,7 @@
       opt.textContent = `${i + 1}/${images.length}  ${im.name}`;
       imageSelect.appendChild(opt);
     });
-    showImage(0);
+    showImage(targetIndex);
   }
 
   function showImage(i) {
@@ -103,17 +121,14 @@
   }
   const zoomCenter = (f) => zoomAt(f, viewer.clientWidth / 2, viewer.clientHeight / 2);
 
-  $('folderInput').addEventListener('change', (e) => { if (e.target.files.length) loadFiles(e.target.files); e.target.value = ''; });
-  $('fileInput').addEventListener('change', (e) => { if (e.target.files.length) loadFiles(e.target.files); e.target.value = ''; });
+  $('folderInput').addEventListener('change', (e) => { if (e.target.files.length) loadFiles(e.target.files, false); e.target.value = ''; });
+  $('fileInput').addEventListener('change', (e) => { if (e.target.files.length) loadFiles(e.target.files, true); e.target.value = ''; });
   $('prevBtn').onclick = () => showImage(currentIndex - 1);
   $('nextBtn').onclick = () => showImage(currentIndex + 1);
   imageSelect.onchange = () => showImage(+imageSelect.value);
   $('zoomInBtn').onclick = () => zoomCenter(1.25);
   $('zoomOutBtn').onclick = () => zoomCenter(0.8);
   $('fitBtn').onclick = fitImage;
-  // 下段ツールバーの「フォルダ」「画像」ボタン（上段と同じ入力欄を開く。画像は複数選択可）
-  $('drawFolderBtn').onclick = () => $('folderInput').click();
-  $('drawImageBtn').onclick = () => $('fileInput').click();
 
   // ホイールでズーム
   // タッチパッドは細かいイベントが大量に来るため、スクロール量(deltaY)に比例させて拡大率を決める
@@ -244,7 +259,7 @@
   viewer.addEventListener('drop', (e) => {
     e.preventDefault();
     viewer.classList.remove('dragover');
-    if (e.dataTransfer.files.length) loadFiles(e.dataTransfer.files);
+    if (e.dataTransfer.files.length) loadFiles(e.dataTransfer.files, true);
   });
 
   /* ---------------------------------------------------------

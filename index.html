@@ -20,12 +20,11 @@
     <!-- ===== 上段：お手本画像 ===== -->
     <section id="topPane" class="pane">
       <div class="toolbar">
-        <span class="title">🖼<span class="txt"> お手本</span></span>
-        <label class="btn pc-only">
+        <label class="btn pc-only" title="フォルダ内の画像をまとめて開く">
           📁<span class="txt"> フォルダを開く</span>
           <input type="file" id="folderInput" webkitdirectory directory multiple hidden />
         </label>
-        <label class="btn">
+        <label class="btn" title="画像を選ぶ（複数選択・追加選択できます）">
           🗂<span class="txt"> 画像を選ぶ</span>
           <input type="file" id="fileInput" accept="image/*" multiple hidden />
         </label>
@@ -85,16 +84,9 @@
           <div id="palette"></div>
         </div>
 
-        <!-- 2段目：フォルダ・画像・重ねる・透過・保存・グリッド・元に戻す・全消去 -->
+        <!-- 2段目：重ねる・透過・保存・グリッド・元に戻す・全消去 -->
         <div class="draw-row">
           <div class="action-group">
-            <button class="dt-btn act-open pc-only" id="drawFolderBtn" title="フォルダを選ぶ（フォルダ内の画像をまとめて読み込み）">
-              <svg class="fill-icon" viewBox="0 0 24 24"><path d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z"/></svg>
-            </button>
-            <button class="dt-btn act-open" id="drawImageBtn" title="画像を選ぶ（複数選択できます）">
-              <svg class="fill-icon" viewBox="0 0 24 24"><path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-1.5 14h-11l3.2-4.2 2.3 2.8 3.2-4.1L17.5 17zM8.5 10.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/></svg>
-              <span>画像</span>
-            </button>
             <button class="dt-btn act-overlay" id="overlayBtn" title="お手本を重ねる (T)">
               <svg viewBox="0 0 24 24"><rect x="3" y="3" width="12" height="12" rx="2"/><rect x="9" y="9" width="12" height="12" rx="2"/></svg>
               <span>重ねる</span>
