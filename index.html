@@ -60,7 +60,7 @@
     <!-- ===== 下段：描画エリア ===== -->
     <section id="bottomPane" class="pane">
       <div class="draw-toolbar" id="drawToolbar">
-        <!-- 1段目：描画ツール5種 ＋ カラーパレット -->
+        <!-- 1段目：描画ツール7種 ＋ カラーパレット -->
         <div class="draw-row">
           <div class="tool-group" id="toolGroup">
             <button class="dt-btn tool active" data-tool="pen" title="ペン (P)">
@@ -106,8 +106,11 @@
             <button class="dt-btn act-icon act-grid active" id="paperGridBtn" title="方眼グリッド表示切替">
               <svg viewBox="0 0 24 24"><rect x="4.5" y="4.5" width="15" height="15" rx="2"/><path d="M12 4.5v15M4.5 12h15"/></svg>
             </button>
-            <button class="dt-btn act-icon act-undo" id="undoBtn" title="元に戻す (Ctrl+Z)">
+            <button class="dt-btn act-icon act-undo" id="undoBtn" title="元に戻す (Ctrl+Z)" disabled>
               <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+            </button>
+            <button class="dt-btn act-icon act-undo" id="redoBtn" title="やり直し (Ctrl+Y)" disabled>
+              <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
             </button>
             <button class="dt-btn act-icon act-clear" id="clearBtn" title="全消去">
               <svg class="fill-icon" viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v9h-2V9zm4 0h2v9h-2V9zM6 9h12l-1 11a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L6 9z"/></svg>
@@ -115,7 +118,7 @@
           </div>
         </div>
 
-        <!-- 3段目：左に描画エリアの拡大縮小（－／％／＋）、右に線の太さ（－／px／＋） -->
+        <!-- 3段目：左に描画エリアの拡大縮小（－／％／＋）、中央に線の太さ（－／px／＋）、右に角度・正方形固定 -->
         <div class="draw-row draw-row-sub">
           <div class="zoom-group">
             <button class="dt-btn size-btn" id="canvasZoomOutBtn" title="縮小">
@@ -131,12 +134,17 @@
               <svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg>
             </button>
             <span id="sizeIndicator" class="size-indicator" aria-live="polite">
+              <span id="sizeDot" class="size-dot"></span>
               <span id="sizeVal">8px</span>
             </span>
             <button class="dt-btn size-btn" id="sizeUpBtn" title="線を太くする">
               <svg viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg>
             </button>
           </div>
+          <button class="dt-btn snap-btn" id="snapBtn" title="角度・比率固定 (Shift) ／ 直線を45°刻み、四角を正方形、丸を正円に固定">
+            <svg viewBox="0 0 24 24"><path d="M4 20h16M4 20V4M4 20L19 5"/></svg>
+            <span>45°/正</span>
+          </button>
         </div>
       </div>
 

@@ -74,6 +74,9 @@
       fitImage();
       syncOverlay();
     };
+    refImage.onerror = () => {
+      alert('画像の読み込みに失敗しました。');
+    };
     refImage.src = images[currentIndex].url;
   }
 
@@ -182,7 +185,6 @@
   // スワイプ（ドラッグ移動）の速度係数：1 = 指と同じ速さ、小さいほどゆっくり動く
   const PAN_SPEED = 0.5;         // 上段（お手本）：指でスワイプした時
   const MOUSE_PAN_SPEED = 1.0;   // 上段（お手本）：マウスで画像をつかんで動かした時（PC）
-  const CANVAS_PAN_SPEED = 0.8;  // 下段（描画エリア）※現在は未使用：下段も上段と同じ速度を使う
   const touches = new Map(); // pointerId -> {x, y}
   let gesture = null;
   let viewerPanSpeed = PAN_SPEED;
@@ -208,8 +210,12 @@
     }
   }
   viewer.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse') {
+      if (e.button !== 0) return;
+      touches.clear();
+    }
     viewerPanSpeed = e.pointerType === 'mouse' ? MOUSE_PAN_SPEED : PAN_SPEED;
-    viewer.setPointerCapture(e.pointerId);
+    try { viewer.setPointerCapture(e.pointerId); } catch (_) {}
     touches.set(e.pointerId, localPt(e));
     viewer.classList.add('dragging');
     startGesture();
@@ -255,7 +261,7 @@
 
   // ドラッグ＆ドロップ
   viewer.addEventListener('dragover', (e) => { e.preventDefault(); viewer.classList.add('dragover'); });
-  viewer.addEventListener('dragleave', () => viewer.classList.remove('dragleave', 'dragover'));
+  viewer.addEventListener('dragleave', () => viewer.classList.remove('dragover'));
   viewer.addEventListener('drop', (e) => {
     e.preventDefault();
     viewer.classList.remove('dragover');
@@ -474,10 +480,23 @@
   let histIndex = 0;
   const MAX_HISTORY = 300;
 
+  function releaseStrokeResources(s) {
+    if (s && s.bmp) {
+      s.bmp.width = 0;
+      s.bmp.height = 0;
+      s.bmp = null;
+    }
+  }
+
   function pushHistory(entry) {
+    for (let i = histIndex; i < undoStack.length; i++) {
+      releaseStrokeResources(undoStack[i]);
+    }
     undoStack.length = histIndex;
     undoStack.push(entry);
-    if (undoStack.length > MAX_HISTORY) undoStack.shift();
+    if (undoStack.length > MAX_HISTORY) {
+      releaseStrokeResources(undoStack.shift());
+    }
     histIndex = undoStack.length;
     updateHistoryButtons();
   }
@@ -545,11 +564,23 @@
     return `rgb(${r}, ${g}, ${b})`;
   };
 
-  // 色・半径ごとに「2倍解像度できめ細かい鉛筆の粒子スタンプ」を16種類キャッシュ
+  // 色・半径ごとに「2倍解像度できめ細かい鉛筆の粒子スタンプ」を16種類キャッシュ（LRU上限付き）
   const pencilCache = new Map();
+  const MAX_PENCIL_CACHE = 64;
   function getPencilDabs(hex, radius) {
     const key = `${hex}_${radius}_${dpr}`;
-    if (pencilCache.has(key)) return pencilCache.get(key);
+    if (pencilCache.has(key)) {
+      const hit = pencilCache.get(key);
+      pencilCache.delete(key);
+      pencilCache.set(key, hit);
+      return hit;
+    }
+    if (pencilCache.size >= MAX_PENCIL_CACHE) {
+      const oldestKey = pencilCache.keys().next().value;
+      const oldest = pencilCache.get(oldestKey);
+      if (oldest && oldest.sheet) { oldest.sheet.width = 0; oldest.sheet.height = 0; }
+      pencilCache.delete(oldestKey);
+    }
     const VARIANTS = 16;
     const ss = dpr * 2; // 2倍オーバーサンプリングで粒子をきめ細かくする
     const R = Math.max(2, Math.ceil((radius + 1.0) * ss));
@@ -682,7 +713,7 @@
 
   // 楕円（丸）の縁を鉛筆スタンプでなぞる（細かい線分に分割して連続描画）
   function stampEllipse(c, dabs, dabScale, step, jitterScale, cx, cy, rx, ry, st, clip) {
-    const n = Math.min(720, Math.max(36, Math.ceil(Math.PI * (rx + ry) / 3)));
+    const n = Math.min(2048, Math.max(36, Math.ceil(Math.PI * (rx + ry) / 2.5)));
     let px = cx + rx, py = cy;
     for (let i = 1; i <= n; i++) {
       const a = (i / n) * Math.PI * 2;
@@ -830,7 +861,7 @@
     const baseR = (s.worldSize * s.baseZ) / 2;
     const step = pencilStepFor(baseR) * scaleFactor;
     const quadStep = Math.min(8, 1.5 * scaleFactor);
-    const margin = screenR + 6;
+    const margin = Math.ceil(dabs.drawR * dabScale + 0.3 * scaleFactor + 8);
     const clip = { minX: -margin, minY: -margin, maxX: viewW + margin, maxY: viewH + margin };
     const rect = worldBoundsToDeviceRect(s.bounds, margin);
     if (!rect) return;
@@ -901,6 +932,10 @@
   function renderAllStrokes() {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!drawing) {
+      pctx.setTransform(1, 0, 0, 1, 0, 0);
+      pctx.clearRect(0, 0, preview.width, preview.height);
+    }
     if (!viewW || !viewH || histIndex <= 0) return;
     let startIdx = 0;
     for (let i = histIndex - 1; i >= 0; i--) {
@@ -1078,8 +1113,10 @@
     input.style.fontSize = TEXT_SIZE + 'px';
     input.style.color = pencilColorCss(state.color);
     input.style.opacity = String(Math.min(1, state.alpha + 0.1));
-    input.style.left = (sx - 3) + 'px';
-    input.style.top = (sy - TEXT_SIZE * 0.625 - 1) + 'px';
+    const maxLeft = Math.max(4, (viewW || wrap.clientWidth) - 64);
+    const maxTop = Math.max(4, (viewH || wrap.clientHeight) - TEXT_SIZE - 8);
+    input.style.left = Math.min(maxLeft, Math.max(4, sx - 3)) + 'px';
+    input.style.top = Math.min(maxTop, Math.max(4, sy - TEXT_SIZE * 0.625 - 1)) + 'px';
     const fit = () => {
       measureCtx.font = TEXT_FONT;
       input.style.width = Math.ceil(measureCtx.measureText(input.value || 'あ').width + TEXT_SIZE * 0.6) + 'px';
@@ -1091,9 +1128,12 @@
       if (ev.key === 'Enter') { ev.preventDefault(); commitText(); }
       else if (ev.key === 'Escape') { ev.preventDefault(); commitText(true); }
     });
-    input.addEventListener('blur', () => {
-      if (textEdit && textEdit.input === input && performance.now() - textEdit.opened < 400) input.focus({ preventScroll: true });
-      else commitText();
+    input.addEventListener('blur', (ev) => {
+      if (textEdit && textEdit.input === input && !ev.relatedTarget && performance.now() - textEdit.opened < 400) {
+        input.focus({ preventScroll: true });
+      } else {
+        commitText();
+      }
     });
     layer.appendChild(input);
     textEdit = { input, p, color: state.color, alpha: state.alpha, baseZ: pan.z, opened: performance.now() };
@@ -1137,6 +1177,9 @@
     const dx = (p.x - (x0 + x1) / 2) / rx, dy = (p.y - (y0 + y1) / 2) / ry;
     return dx * dx + dy * dy <= 1;
   }
+  function boundsOverlap(a, b) {
+    return a && b && a.minX <= b.maxX && a.maxX >= b.minX && a.minY <= b.maxY && a.maxY >= b.minY;
+  }
   function fillAt(p) {
     commitText();
     syncRenderedView();
@@ -1147,6 +1190,17 @@
     for (let i = histIndex - 1; i >= start; i--) {
       const s = undoStack[i];
       if ((s.tool !== 'rect' && s.tool !== 'circle') || !shapeContains(s, p)) continue;
+      // 図形を描いた後にその上から線や別図形が描き足されている場合は、分割領域ごとに塗れるよう領域塗りへ移行
+      let overlappedByStroke = false;
+      for (let j = i + 1; j < histIndex; j++) {
+        const later = undoStack[j];
+        if ((later.tool === 'pen' || later.tool === 'line' || later.tool === 'rect' || later.tool === 'circle') &&
+            boundsOverlap(s.bounds, later.bounds)) {
+          overlappedByStroke = true;
+          break;
+        }
+      }
+      if (overlappedByStroke) break;
       const h = s.worldSize / 2; // 枠線の内側から塗る
       const x0 = Math.min(s.x1, s.x2) + h, x1 = Math.max(s.x1, s.x2) - h;
       const y0 = Math.min(s.y1, s.y2) + h, y1 = Math.max(s.y1, s.y2) - h;
@@ -1170,9 +1224,12 @@
     const d = ctx.getImageData(0, 0, W, H).data;
     const si = (sy * W + sx) * 4;
     const r0 = d[si], g0 = d[si + 1], b0 = d[si + 2], a0 = d[si + 3];
+    const [cr, cg, cb] = pencilRgb(state.color);
+    // すでにほぼ同じ色で塗られている場所をタップした場合は何もしない
+    if (a0 >= 180 && Math.abs(r0 - cr) + Math.abs(g0 - cg) + Math.abs(b0 - cb) < 16) return;
     const blank = a0 < 24;
     const same = (i) => blank
-      ? d[i + 3] < 48
+      ? d[i + 3] < 36
       : Math.abs(d[i] - r0) + Math.abs(d[i + 1] - g0) + Math.abs(d[i + 2] - b0) + Math.abs(d[i + 3] - a0) <= 64;
     const mask = new Uint8Array(W * H);
     const stack = [sx, sy];
@@ -1201,9 +1258,13 @@
     const bx0 = Math.max(0, minX - 1), by0 = Math.max(0, minY - 1);
     const bx1 = Math.min(W - 1, maxX + 1), by1 = Math.min(H - 1, maxY + 1);
     const bw = bx1 - bx0 + 1, bh = by1 - by0 + 1;
-    const [cr, cg, cb] = pencilRgb(state.color);
     const out = new ImageData(bw, bh);
     const od = out.data;
+    let seed = 135792468;
+    const rand = () => {
+      seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5;
+      return (seed >>> 0) / 4294967296;
+    };
     for (let y = by0; y <= by1; y++) {
       for (let x = bx0; x <= bx1; x++) {
         let on = mask[y * W + x];
@@ -1213,7 +1274,8 @@
         }
         if (on) {
           const o = ((y - by0) * bw + (x - bx0)) * 4;
-          od[o] = cr; od[o + 1] = cg; od[o + 2] = cb; od[o + 3] = 255;
+          const a = rand() < 0.14 ? 0.65 : (0.84 + rand() * 0.16);
+          od[o] = cr; od[o + 1] = cg; od[o + 2] = cb; od[o + 3] = Math.round(a * 255);
         }
       }
     }
@@ -1238,7 +1300,9 @@
     const isTouch = e.pointerType === 'touch';
     if (isMouse && e.button !== 0 && e.button !== 1 && e.button !== 2) return;
     const mousePan = isMouse && (e.button === 1 || e.button === 2);
-    const firstTouch = drawing && drawing.pointerType === 'touch' ? drawing : pendingTap;
+    const firstTouch = drawing && drawing.pointerType === 'touch'
+      ? drawing
+      : (pendingTap && pendingTap.pointerType === 'touch' ? pendingTap : null);
     const twoFinger = isTouch && !!firstTouch;
     if (panGesture || twoFinger || state.tool === 'hand' || spaceDown || mousePan) {
       e.preventDefault();
@@ -1271,7 +1335,7 @@
 
     if (tool === 'text' || tool === 'fill') {
       captureWrap(e.pointerId);
-      pendingTap = { id: e.pointerId, p, tool, client: { x: e.clientX, y: e.clientY }, start: { x: e.clientX, y: e.clientY } };
+      pendingTap = { id: e.pointerId, p, tool, pointerType: e.pointerType, client: { x: e.clientX, y: e.clientY }, start: { x: e.clientX, y: e.clientY } };
       return;
     }
     captureWrap(e.pointerId);
@@ -1349,7 +1413,7 @@
     let rect;
     if (d.tool === 'pen') {
       renderFreehand(d, true);
-      rect = worldBoundsToDeviceRect(d.bounds, d.size / 2 + 6);
+      rect = worldBoundsToDeviceRect(d.bounds, Math.ceil(d.size * 0.6 + 8));
     } else {
       renderShape(d);
       rect = d.shapeRect;
@@ -1462,6 +1526,15 @@
   if (sizeDownBtn) sizeDownBtn.onclick = () => stepStrokeSize(-1);
   if (sizeUpBtn) sizeUpBtn.onclick = () => stepStrokeSize(1);
 
+  // 角度・正方形・正円スナップ切替（スマホでもShift相当の操作を可能に）
+  const snapBtn = $('snapBtn');
+  if (snapBtn) {
+    snapBtn.onclick = () => {
+      state.snap = !state.snap;
+      snapBtn.classList.toggle('active', state.snap);
+    };
+  }
+
   // 並び：赤、緑、青、紫、オレンジ、黄色、白、黒
   const PALETTE = ['#ff4d4f', '#2ecc71', '#3498db', '#9b59b6', '#e67e22', '#f1c40f', '#ffffff', '#1e1e1e'];
   const paletteEl = $('palette');
@@ -1517,6 +1590,7 @@
     const base = images[currentIndex] ? images[currentIndex].name.split(/[\\/]/).pop().replace(/\.[^.]+$/, '') : 'drawing';
     const filename = `${base}_trace_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.png`;
     out.toBlob((blob) => {
+      if (!blob) return;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.download = filename;
@@ -1573,16 +1647,20 @@
   gridSize.oninput = updateGrid;
   updateGrid();
 
-  // 上下の仕切りドラッグ
+  // 上下の仕切りドラッグ（画面回転・リサイズ時にも破綻しないようパーセンテージで保持）
   const splitter = $('splitter');
   const topPane = $('topPane');
+  const appEl = $('app');
   splitter.addEventListener('pointerdown', (e) => {
-    splitter.setPointerCapture(e.pointerId);
+    try { splitter.setPointerCapture(e.pointerId); } catch (_) {}
     splitter.classList.add('active');
     const move = (ev) => {
-      const h = window.innerHeight;
-      const y = Math.min(h - 120, Math.max(80, ev.clientY));
-      topPane.style.flexBasis = y + 'px';
+      const appRect = appEl.getBoundingClientRect();
+      const totalH = appRect.height || window.innerHeight || 1;
+      const relY = ev.clientY - appRect.top;
+      const clampedY = Math.min(totalH - 140, Math.max(80, relY));
+      const pct = Math.min(82, Math.max(15, (clampedY / totalH) * 100));
+      topPane.style.flexBasis = pct.toFixed(2) + '%';
       requestResize();
     };
     const up = () => {
@@ -1598,8 +1676,29 @@
 
   window.addEventListener('resize', requestResize);
 
+  // ウィンドウのフォーカスが外れた際、押しっぱなし状態や残留ポインターをリセット
+  const resetTransientInput = () => {
+    if (spaceDown) { spaceDown = false; updateCursor(); }
+    if (touches.size) {
+      touches.clear();
+      gesture = null;
+      viewer.classList.remove('dragging');
+    }
+    if (panPointers.size) {
+      panPointers.clear();
+      panGesture = null;
+      updateCursor();
+      syncRenderedView();
+    }
+  };
+  window.addEventListener('blur', resetTransientInput);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) resetTransientInput();
+  });
+
   document.addEventListener('keydown', (e) => {
     if (e.target.tagName === 'SELECT' || (e.target.tagName === 'INPUT' && e.target.type !== 'checkbox')) return;
+    if (e.altKey) return;
     const k = e.key.toLowerCase();
     if (e.ctrlKey || e.metaKey) {
       if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
@@ -1622,6 +1721,13 @@
   document.addEventListener('keyup', (e) => {
     if (e.key === ' ' && spaceDown) { spaceDown = false; updateCursor(); }
   });
+
+  // PWA Service Worker 登録（スマホのホーム画面追加・オフライン起動に対応）
+  if ('serviceWorker' in navigator && /^https?:$/i.test(location.protocol)) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    });
+  }
 
   // 初期化
   resizeCanvas();

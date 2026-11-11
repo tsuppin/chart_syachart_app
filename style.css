@@ -54,7 +54,6 @@ html, body {
 }
 .draw-row::-webkit-scrollbar { display: none; }
 .draw-row > * { flex-shrink: 0; }
-.draw-row-sub { justify-content: space-between; gap: 8px; }
 
 .tool-group { display: flex; align-items: center; gap: 6px; }
 .dt-btn {
@@ -71,7 +70,7 @@ html, body {
 }
 .dt-btn svg.fill-icon { fill: currentColor; stroke: none; }
 
-/* 1段目：描画ツール5種 */
+/* 1段目：描画ツール7種 */
 .tool-group .dt-btn.tool {
   width: 38px; height: 38px; border-radius: 9px;
   background: #26252b; border-color: #393841; color: #f4f4f8;
@@ -95,15 +94,25 @@ html, body {
 }
 @media (hover: hover) { .swatch:hover { transform: scale(1.1); } }
 
-/* 2段目左：－ / ＋ 線の太さ調整ボタン */
+/* 3段目：拡大縮小・線の太さ・角度比率スナップ */
 .size-group, .zoom-group { position: relative; display: flex; align-items: center; gap: 5px; }
-.draw-row-sub { justify-content: flex-start; gap: 22px; }
+.draw-row-sub { justify-content: flex-start; gap: 18px; }
 .dt-btn.size-btn {
   width: 28px; height: 28px; border-radius: 6px;
   background: #313036; border-color: #47464e; color: #f5f5fa;
 }
 .dt-btn.size-btn svg { width: 14px; height: 14px; stroke-width: 2.5; }
 @media (hover: hover) { .dt-btn.size-btn:not(:disabled):hover { background: #3d3c44; } }
+.dt-btn.snap-btn {
+  height: 28px; padding: 0 9px; border-radius: 6px; font-size: 12px; gap: 4px;
+  background: #26252b; border-color: #3d3c45; color: #9a9ea8;
+}
+.dt-btn.snap-btn svg { width: 14px; height: 14px; stroke-width: 2.2; }
+.dt-btn.snap-btn.active {
+  background: #1d3c58; border-color: #4ea3e6; color: #8ad0ff;
+}
+@media (hover: hover) { .dt-btn.snap-btn:hover { filter: brightness(1.12); } }
+#canvasZoomLabel { cursor: pointer; }
 .size-indicator {
   display: inline-flex; align-items: center; justify-content: center; gap: 5px;
   min-width: 48px; height: 28px; padding: 0 4px;
@@ -116,7 +125,7 @@ html, body {
   border: 1px solid rgba(255, 255, 255, .25); flex-shrink: 0;
 }
 
-/* 2段目右：アクションボタン群 */
+/* 2段目：アクションボタン群 */
 .action-group { display: flex; align-items: center; gap: 7px; }
 .action-group .dt-btn { height: 38px; border-radius: 8px; padding: 0 14px; }
 .action-group .dt-btn:disabled { opacity: .45; }
@@ -168,10 +177,10 @@ html, body {
 
 /* 文字ツールの入力欄（キャンバス上に表示） */
 #textInput {
-  position: absolute; z-index: 5; margin: 0; padding: 0 2px; min-width: 2em;
+  position: absolute; z-index: 5; margin: 0; padding: 0 4px; min-width: 2em; max-width: calc(100vw - 24px);
   font-family: "Segoe UI", "Yu Gothic UI", "Meiryo", "Noto Sans JP", sans-serif;
-  line-height: 1.25; background: rgba(0, 0, 0, .35);
-  border: 1px dashed rgba(255, 255, 255, .7); border-radius: 2px; outline: none;
+  line-height: 1.25; background: rgba(0, 0, 0, .45);
+  border: 1px dashed rgba(255, 255, 255, .8); border-radius: 3px; outline: none;
 }
 
 select {
@@ -307,25 +316,22 @@ body.mobile #splitter::after { top: 6px; width: 60px; margin-left: -30px; height
   .toolbar input[type="range"] { flex: 1; min-width: 50px; max-width: 120px; height: 24px; margin: 0; }
 
   .draw-toolbar { padding: 5px 7px; gap: 5px; }
-  .draw-row { gap: 7px; }
+  /* スマホでは各段を折り返して全ボタンが画面内に収まるようにする */
+  .draw-row { flex-wrap: wrap; gap: 7px; row-gap: 6px; overflow-x: visible; }
   .tool-group { gap: 4px; }
   .tool-group .dt-btn.tool { width: 33px; height: 33px; border-radius: 8px; }
   .tool-group .dt-btn.tool svg { width: 16px; height: 16px; }
   #palette { gap: 5px; padding: 2px; }
   .swatch { width: 21px; height: 21px; }
   .swatch.selected { box-shadow: 0 0 0 1.5px #1a191f, 0 0 0 3px #ffffff; }
-  .dt-btn.size-btn { width: 32px; height: 32px; }
-  /* スマホでは各段を折り返して全ボタンが画面内に収まるようにする */
-  .draw-row { flex-wrap: wrap; row-gap: 6px; overflow-x: visible; }
-  .draw-row-sub { gap: 14px; }
+  .dt-btn.size-btn { width: 30px; height: 30px; }
+  .dt-btn.snap-btn { height: 30px; padding: 0 8px; font-size: 11.5px; }
+  .draw-row-sub { gap: 10px; }
   .size-indicator { min-width: 40px; font-size: 12px; }
-  .action-group { flex-wrap: wrap; row-gap: 5px; }
-  .action-group .dt-btn { height: 36px; }
-  .action-group .dt-btn.act-icon { min-width: 40px; }
-  .action-group { gap: 4px; }
-  .action-group .dt-btn { height: 30px; padding: 0 7px; font-size: 11.5px; gap: 3px; }
+  .action-group { flex-wrap: wrap; gap: 3.5px; row-gap: 5px; }
+  .action-group .dt-btn { height: 30px; padding: 0 6px; font-size: 11px; gap: 3px; }
   .action-group .dt-btn svg { width: 14px; height: 14px; }
-  .action-group .dt-btn.act-icon { min-width: 34px; padding: 0 6px; }
+  .action-group .dt-btn.act-icon { min-width: 31px; padding: 0 5px; }
 }
 
 /* 狭い画面では上段ボタンの文字を隠してアイコンだけに */
