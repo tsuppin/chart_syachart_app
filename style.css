@@ -15,7 +15,7 @@ html, body {
 }
 
 .pane { display: flex; flex-direction: column; min-height: 80px; overflow: hidden; }
-#topPane { flex: 0 0 50%; }
+#topPane { flex: 0 0 40%; }
 #bottomPane { flex: 1 1 auto; }
 
 .toolbar {
