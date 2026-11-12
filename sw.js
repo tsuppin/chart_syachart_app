@@ -1,4 +1,4 @@
-const CACHE_NAME = 'syachart-v2';
+const CACHE_NAME = 'syachart-v3';
 const ASSETS = [
   './',
   './index.html',

@@ -300,14 +300,15 @@
   };
   // --- マグネット設定（下段の薄い方眼に合わせる） ---
   const MAGNET_GRID = 10;      // 吸い寄せる線の間隔（ワールド座標10px）
-  const MAGNET_RANGE = 7;      // 線から画面上でこの距離(px)以内だと吸い寄せられる
-  const MAGNET_STRENGTH = 1.0; // 吸い寄せの強さ（0〜1、1で線にぴったり。小さいほど弱い）
-  // 線に近いほど強く、範囲の端では0になるので、線がカクッと飛ばない
+  const MAGNET_RANGE = 14;     // 線から画面上でこの距離(px)以内だと吸い寄せられる（強力吸着）
+  const MAGNET_STRENGTH = 1.0; // 吸い寄せの強さ（0〜1、1で線にぴったり吸着。小さいほど弱い）
+  // 線に近いほど強く吸い寄せ、1.0では確実に線へぴったり吸着（スナップ）
   function magnetAxis(v, z) {
     const line = Math.round(v / MAGNET_GRID) * MAGNET_GRID;
     const dist = Math.abs(v - line);
     const range = MAGNET_RANGE / z;
     if (dist >= range) return v;
+    if (MAGNET_STRENGTH >= 1.0) return line;
     return v + (line - v) * MAGNET_STRENGTH * (1 - dist / range);
   }
   // ペン（フリーハンド）には効かせない。直線・四角だけに効く（方眼オフ時は無効）
