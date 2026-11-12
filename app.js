@@ -319,6 +319,7 @@
   let drawing = null;
   const renderedView = { x: 0, y: 0, z: 1 };
   let wheelSyncTimer = 0;
+  let panEndTimer = 0;
 
   // --- 下段のスワイプ移動（パン）・拡大縮小 ---
   const MIN_CANVAS_ZOOM = 0.25;
@@ -414,6 +415,7 @@
   function syncRenderedView() {
     if (drawing) return;
     if (wheelSyncTimer) { clearTimeout(wheelSyncTimer); wheelSyncTimer = 0; }
+    if (panEndTimer) { clearTimeout(panEndTimer); panEndTimer = 0; }
     if (panRafId) { cancelAnimationFrame(panRafId); panRafId = 0; }
     applyPan();
     renderedView.x = pan.x;
@@ -660,7 +662,7 @@
   }
 
   // 線の半径に応じたスタンプ間隔（太さを変えても鉛筆の粒状感・濃さが自然になるよう調整）
-  const pencilStepFor = (radius) => Math.min(2.0, Math.max(0.5, radius * 0.28));
+  const pencilStepFor = (radius) => Math.min(4.5, Math.max(1.2, radius * 0.42));
   function stampDotScaled(c, dabs, dabScale, jitterScale, x, y, idx) {
     const h = ((idx * 2654435761) >>> 0);
     const v = h % dabs.VARIANTS;
@@ -712,9 +714,9 @@
     }
   }
 
-  // 楕円（丸）の縁を鉛筆スタンプでなぞる（細かい線分に分割して連続描画）
+  // 楕円（丸）の縁を鉛筆スタンプでなぞる（なめらかさを維持しつつ分割数を適正化）
   function stampEllipse(c, dabs, dabScale, step, jitterScale, cx, cy, rx, ry, st, clip) {
-    const n = Math.min(2048, Math.max(36, Math.ceil(Math.PI * (rx + ry) / 2.5)));
+    const n = Math.min(360, Math.max(24, Math.ceil(Math.PI * (rx + ry) / 6)));
     let px = cx + rx, py = cy;
     for (let i = 1; i <= n; i++) {
       const a = (i / n) * Math.PI * 2;
@@ -801,8 +803,8 @@
     const scaleFactor = vz / s.baseZ;
     const screenR = (s.worldSize / 2) * vz;
 
-    // 大きく縮小して極細になった線は軽量なアンチエイリアスパスで描画
-    if (screenR < 0.6) {
+    // 縮小時や細線はブラウザネイティブの軽量アンチエイリアスパスで高速描画
+    if (screenR < 1.1) {
       const w = screenR * 2;
       const drawW = Math.max(0.7, w);
       ctx.save();
@@ -861,14 +863,13 @@
     const dabScale = screenR / dabR;
     const baseR = (s.worldSize * s.baseZ) / 2;
     const step = pencilStepFor(baseR) * scaleFactor;
-    const quadStep = Math.min(8, 1.5 * scaleFactor);
+    const quadStep = Math.min(10, 2.8 * scaleFactor);
     const margin = Math.ceil(dabs.drawR * dabScale + 0.3 * scaleFactor + 8);
     const clip = { minX: -margin, minY: -margin, maxX: viewW + margin, maxY: viewH + margin };
     const rect = worldBoundsToDeviceRect(s.bounds, margin);
     if (!rect) return;
 
     pctx.setTransform(1, 0, 0, 1, 0, 0);
-    pctx.clearRect(rect.x, rect.y, rect.w, rect.h);
     pctx.imageSmoothingEnabled = true;
     pctx.imageSmoothingQuality = 'high';
     pctx.globalAlpha = 1;
@@ -1083,7 +1084,11 @@
     else {
       panGesture = null;
       updateCursor();
-      syncRenderedView();
+      if (panEndTimer) clearTimeout(panEndTimer);
+      panEndTimer = setTimeout(() => {
+        panEndTimer = 0;
+        syncRenderedView();
+      }, 50);
     }
     return true;
   }
@@ -1377,7 +1382,7 @@
     d.client = { x: e.clientX, y: e.clientY };
     if (d.tool === 'pen') {
       const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
-      const minDelta = 0.4 / d.baseZ; // 拡大率に合わせて画面上0.4px未満の細かすぎる点だけ間引く
+      const minDelta = 0.9 / d.baseZ; // 拡大率に合わせて画面上0.9px未満の微小な手ブレ・重複点を間引く
       for (const ev of events) {
         const p = getWorldPos(ev, d.rect);
         const last = d.pts[d.pts.length - 1];
